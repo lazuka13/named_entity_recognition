@@ -1,0 +1,7 @@
+.ipynb_checkpoints
+__pycache__
+bsnlp_dataset
+conll2003_dataset
+.idea
+factrueval2016_dataset
+*.npy

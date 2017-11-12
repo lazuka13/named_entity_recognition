@@ -3,6 +3,7 @@ import re
 import string
 import os
 from sklearn import preprocessing
+from scipy.sparse import csr_matrix
 import numpy as np
 
 
@@ -20,6 +21,15 @@ class ColumnApplier(object):
         for i, k in self._column_stages.items():
             X[:, i] = k.transform(X[:, i])
         return X
+
+def save_sparse_csr(filename, array):
+    np.savez(filename,data = array.data ,indices=array.indices,
+             indptr =array.indptr, shape=array.shape )
+
+def load_sparse_csr(filename):
+    loader = np.load(filename)
+    return csr_matrix((  loader['data'], loader['indices'], loader['indptr']),
+                         shape = loader['shape'])
 
 
 class Generator:
@@ -45,7 +55,7 @@ class Generator:
         :return: features_list: Разреженная матрица
         """
         if os.path.exists(path):
-            sparse_features_list = np.load(path)
+            sparse_features_list = load_sparse_csr(path)
             return sparse_features_list
 
         data = [["" for i in range(len(self._column_types))] for i in range(self._context_len)] + data
@@ -112,6 +122,7 @@ class Generator:
                 initial_arr.append(self.get_initial(data[i + j][word_index]))
             arr += initial_arr
 
+        
             features_list.append(arr)
         features_list = np.array([np.array(line) for line in features_list])
 
@@ -120,7 +131,7 @@ class Generator:
         self._enc = preprocessing.OneHotEncoder(dtype=np.bool_, sparse=True)
         self._enc.fit(sparse_features_list)
         sparse_features_list = self._enc.transform(sparse_features_list)
-        np.save(path, sparse_features_list)
+        save_sparse_csr(path, sparse_features_list)
         return sparse_features_list
 
     def transform(self, data, path):
@@ -130,7 +141,7 @@ class Generator:
         :return: features_list: Список признакiов (Лист листов)
         """
         if os.path.exists(path):
-            sparse_features_list = np.load(path)
+            sparse_features_list = load_sparse_csr(path)
             return sparse_features_list
 
         data = [["" for i in range(len(self._column_types))] for i in range(self._context_len)] + data
@@ -197,11 +208,12 @@ class Generator:
                 initial_arr.append(self.get_initial(data[i + j][word_index]))
             arr += initial_arr
 
+        
             features_list.append(arr)
         features_list = np.array([np.array(line) for line in features_list])
         sparse_features_list = self._multi_encoder.transform(features_list)
         sparse_features_list = self._enc.transform(sparse_features_list)
-        np.save(path, sparse_features_list)
+        save_sparse_csr(path, sparse_features_list)
         return sparse_features_list
 
     def get_pos_tag(self, token):

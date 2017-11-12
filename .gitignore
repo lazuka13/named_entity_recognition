@@ -4,4 +4,5 @@ bsnlp_dataset
 conll2003_dataset
 .idea
 factrueval2016_dataset
+*.npz
 *.npy

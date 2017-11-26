@@ -1,0 +1,66 @@
+\section{Baselines}
+
+Попробуем обучить основные классификаторы на полученных данных. Рассмотрим такие классификаторы, как GradientBoostingClassifier, RandomForestClassifier, LogisticRegression, LinearSVC, без подбора параметров. Приведем результаты нестрогой оценки классификации для всех датасетов (в случае BSNLP воспользуемся данными для обучения FactRuEval и приведем предсказанные имена классов к именам BSNLP по правилам LocOrg ${\Rightarrow}$ LOC, Other ${\Rightarrow}$ MISC):
+
+
+\begin{table}[ht]
+\centering
+\caption{CoNLL2003 Results}
+\label{conll2003}
+\begin{tabular}{|l|l|l|l|l|l|}
+\hline
+            & ORG   & LOC   & MISC  & PER   & Total \\ \hline
+LogReg      & 0.760 & 0.820 & 0.787 & 0.888 & 0.826 \\ \hline
+RF          & 0.676 & 0.725 & 0.682 & 0.849 & 0.752 \\ \hline
+LinSVC      & 0.777 & 0.823 & 0.799 & 0.887 & 0.832 \\ \hline
+GB          & 0.677 & 0.729 & 0.748 & 0.834 & 0.758 \\ \hline
+\end{tabular}
+\end{table}
+
+
+
+\begin{table}[ht]
+\centering
+\caption{FactRuEval Results}
+\label{factrueval}
+\begin{tabular}{|l|l|l|l|l|l|}
+\hline
+          & Per    &      Loc & Org   & LO     & Total \\ \hline
+LogReg    & 0.802  & 0.551    & 0.460 & 0.555  & 0.577 \\ \hline
+RF        & 0.763  & 0.475    & 0.364 & 0.460  & 0.501 \\ \hline
+LinSVC    & 0.804  & 0.553    & 0.512 & 0.559  & 0.603 \\ \hline
+GB        & 0.759  & 0.493    & 0.413 & 0.509  & 0.530 \\ \hline
+\end{tabular}
+\end{table}
+
+
+
+\begin{table}[ht]
+\centering
+\caption{BSNLP EU Results}
+\label{bsnlp_eu}
+\begin{tabular}{|l|l|l|l|l|l|}
+\hline
+            & ORG   & LOC   & MISC  & PER   & Total \\ \hline
+LogReg     & 0.652 & 0.504 & 0.000 & 0.313 & 0.525 \\ \hline
+RF          & 0.386 & 0.403 & 0.000 & 0.225 & 0.328 \\ \hline
+LinSVC      & 0.668 & 0.540 & 0.000 & 0.359 & 0.543 \\ \hline
+GB          & 0.655 & 0.497 & 0.000 & 0.368 & 0.529 \\ \hline
+\end{tabular}
+\end{table}
+
+
+
+\begin{table}[ht]
+\centering
+\caption{BSNLP Trump Results}
+\label{bsnlp_trump}
+\begin{tabular}{|l|l|l|l|l|l|}
+\hline
+            & ORG   & LOC   & MISC  & PER   & Total \\ \hline
+LogReg      & 0.426 & 0.820 & 0.000 & 0.883 & 0.756 \\ \hline
+RF          & 0.289 & 0.700 & 0.000 & 0.823 & 0.674 \\ \hline
+LinSVC      & 0.391 & 0.805 & 0.000 & 0.860 & 0.734 \\ \hline
+GB          & 0.285 & 0.782 & 0.000 & 0.840 & 0.703 \\ \hline
+\end{tabular}
+\end{table}

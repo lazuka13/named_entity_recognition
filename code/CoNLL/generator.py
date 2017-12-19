@@ -149,7 +149,7 @@ class Generator:
         self._multi_encoder = ColumnApplier(
             dict([(i, preprocessing.LabelEncoder()) for i in range(len(features_list[0]))]))
         features_list = self._multi_encoder.fit(features_list, None).transform(features_list)
-        self._enc = preprocessing.OneHotEncoder(dtype=np.bool_, sparse=True)
+        self._enc = preprocessing.OneHotEncoder(dtype=np.int8, sparse=True)
         self._enc.fit(features_list)
         features_list = self._enc.transform(features_list)
 

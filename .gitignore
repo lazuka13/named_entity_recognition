@@ -1,6 +1,6 @@
 .ipynb_checkpoints
 __pycache__
-bsnlp_dataset
+dataset
 conll2003_dataset
 .idea
 factrueval2016_dataset

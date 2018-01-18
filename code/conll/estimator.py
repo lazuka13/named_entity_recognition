@@ -23,7 +23,10 @@ class Estimator:
         return self._recall
 
     def get_f1_measure(self):
-        return 2 * self._precision * self._recall / (self._recall + self._precision)
+        if self._recall + self._precision > 0:
+            return 2 * self._precision * self._recall / (self._recall + self._precision)
+        else:
+            return 0
 
     def get_weight(self):
         return self._false_negative + self._true_positive
@@ -41,7 +44,6 @@ class Estimator:
         else:
             self._recall = 0
         return self._recall, self._precision
-
 
     def compute_entity_f1(self, beginning, ending):
         """
@@ -68,7 +70,7 @@ class Estimator:
             guessed_ne_start = -1
 
             for j in range(len(guessed_sentence)):
-                # Заверашать сущности имеет смысл, только если они уже начаты
+                # Завершать сущности имеет смысл, только если они уже начаты
                 correct_ends = (correct_ne_start != -1) and (correct_sentence[j] in ending)
                 guessed_ends = (guessed_ne_start != -1) and (guessed_sentence[j] in ending)
 
@@ -91,7 +93,6 @@ class Estimator:
 
         self.compute_precision_and_recall()
 
-
     def compute_proper_f1(self):
         """
         Учточнение метода compute_entity_f1 для следующего "честного" способа склейки в сущности:
@@ -102,7 +103,8 @@ class Estimator:
         """
         beginning = [self._label2idx.get('B-' + self._label), self._label2idx.get('E-' + self._label),
                      self._label2idx.get('S-' + self._label), self._label2idx.get('I-' + self._label)]
-        ending = [self._label2idx.get('S-' + self._label), self._label2idx.get('B-' + self._label), self._label2idx.get('O')]
+        ending = [self._label2idx.get('S-' + self._label), self._label2idx.get('B-' + self._label),
+                  self._label2idx.get('O')]
 
         other_entity_types = [entity for entity in self._labels if entity != self._label]
         for other_entity_type in other_entity_types:

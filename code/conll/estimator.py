@@ -22,6 +22,17 @@ class Estimator:
     def get_recall(self):
         return self._recall
 
+    @staticmethod
+    def get_total_f1(labels, y_pred_sent, y_test_sent, encoder):
+        true_positive, false_positive, false_negative = 0, 0, 0
+        for label in labels:
+            est = Estimator(y_pred_sent, y_test_sent, label, labels, encoder)
+            est.compute_proper_f1()
+            true_positive += est._true_positive
+            false_positive += est._false_positive
+            false_negative += est._false_negative
+        return (2 * true_positive) / (2 * true_positive + false_negative + false_positive)
+
     def get_f1_measure(self):
         if self._recall + self._precision > 0:
             return 2 * self._precision * self._recall / (self._recall + self._precision)

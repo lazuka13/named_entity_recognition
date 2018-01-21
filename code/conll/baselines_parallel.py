@@ -77,21 +77,14 @@ def run(data):
         index += length
 
     # производим оценку
-    f_arr = []
-    weight_arr = []
-
     results = {"parameters": parameters}
 
     labels = ["PER", "ORG", "LOC", "MISC"]
     for label in labels:
         est = estimator.Estimator(y_preda_sent, y_testa_sent, label, labels, encoder)
-        f = est.compute_proper_f1()
-        f_arr.append(f)
-        weight   = est.get_weight()
-        weight_arr.append(weight)
-        results[label] = f
+        results[label] = est.compute_proper_f1()
 
-    results["TOTAL"] = sum([F * weight for F, weight in zip(f_arr, weight_arr)]) / sum(weight_arr)
+    results["TOTAL"] = estimator.Estimator.get_total_f1(labels, y_preda_sent, y_testa_sent, encoder)
     return results
 
 

@@ -1,8 +1,9 @@
 .ipynb_checkpoints
-__pycache__
-dataset
-conll2003_dataset
 .idea
-factrueval2016_dataset
-*.npz
-*.npy
+__pycache__
+
+dataset
+prepared_data
+
+.npz
+.npy

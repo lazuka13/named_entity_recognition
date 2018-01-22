@@ -5,23 +5,18 @@ from nltk.tag import map_tag
 from nltk.corpus.reader.api import *
 
 
-class ConllDataReader(CorpusReader):
-    WORDS = 'words'  #: column type for words
-    POS = 'pos'  #: column type for part-of-speech tags
-    TREE = 'tree'  #: column type for parse trees
-    CHUNK = 'chunk'  #: column type for chunk structures
-    NE = 'ne'  #: column type for named entities
-    SRL = 'srl'  #: column type for semantic role labels
-    IGNORE = 'ignore'  #: column type for column that should be ignored
+class DataReader(CorpusReader):
+    WORDS = 'words'
+    POS = 'pos'
+    TREE = 'tree'
+    CHUNK = 'chunk'
+    NE = 'ne'
+    SRL = 'srl'
+    IGNORE = 'ignore'
     OFFSET = 'offset'
     LEN = 'len'
 
-    #: A list of all column types supported by the conll corpus reader.
     COLUMN_TYPES = (WORDS, POS, TREE, CHUNK, NE, SRL, IGNORE, OFFSET, LEN)
-
-    # /////////////////////////////////////////////////////////////////
-    # Constructor
-    # /////////////////////////////////////////////////////////////////
 
     def __init__(self, root, fileids, columntypes,
                  chunk_types=None, root_label='S', pos_in_tree=False,
@@ -40,10 +35,6 @@ class ConllDataReader(CorpusReader):
         self._tree_class = tree_class
         CorpusReader.__init__(self, root, fileids, encoding)
         self._tagset = tagset
-
-    # /////////////////////////////////////////////////////////////////
-    # Data Access Methods
-    # /////////////////////////////////////////////////////////////////
 
     def raw(self, fileids=None):
         if fileids is None:
@@ -183,14 +174,7 @@ class ConllDataReader(CorpusReader):
 
         return LazyMap(get_iob_words, self._grids(fileids))
 
-    # /////////////////////////////////////////////////////////////////
-    # Grid Reading
-    # /////////////////////////////////////////////////////////////////
-
     def _grids(self, fileids=None):
-        # n.b.: we could cache the object returned here (keyed on
-        # fileids), which would let us reuse the same corpus view for
-        # different things (eg srl and parse trees).
         return concat([StreamBackedCorpusView(fileid, self._read_grid_block,
                                               encoding=enc)
                        for (fileid, enc) in self.abspaths(fileids, True)])
@@ -216,12 +200,6 @@ class ConllDataReader(CorpusReader):
             grids.append(grid)
         return grids
 
-    # /////////////////////////////////////////////////////////////////
-    # Transforms
-    # /////////////////////////////////////////////////////////////////
-    # given a grid, transform it into some representation (e.g.,
-    # a list of words or a parse tree).
-
     def _get_words(self, grid):
         return self._get_column(grid, self._colmap['words'])
 
@@ -229,7 +207,8 @@ class ConllDataReader(CorpusReader):
         pos_tags = self._get_column(grid, self._colmap['pos'])
         if tagset and tagset != self._tagset:
             pos_tags = [map_tag(self._tagset, tagset, t) for t in pos_tags]
-        return list(zip(self._get_column(grid, self._colmap['words']), pos_tags))
+        return list(
+            zip(self._get_column(grid, self._colmap['words']), pos_tags))
 
     def _get_iob_words(self, grid, tagset=None):
         pos_tags = self._get_column(grid, self._colmap['pos'])

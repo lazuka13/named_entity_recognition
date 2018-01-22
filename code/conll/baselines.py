@@ -11,7 +11,7 @@ import numpy as np
 import datetime as dt
 import click
 
-import generator
+import features
 import scorer
 import corpus
 import utils
@@ -79,7 +79,7 @@ class TokensClassifier(BaseEstimator):
         y_pred_st = [[enc.get(el) for el in arr] for arr in self.predict(X_st)]
         y_real_st = [[enc.get(el) for el in arr] for arr in y_st]
         labels = ["PER", "ORG", "LOC", "MISC"]
-        result = scorer.Estimator.get_total_f1(labels, y_pred_st, y_real_st, enc)
+        result = scorer.Scorer.get_total_f1(labels, y_pred_st, y_real_st, enc)
         return result
 
     def get_params(self, deep=True):

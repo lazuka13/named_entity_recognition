@@ -1,4 +1,4 @@
-class Estimator:
+class Scorer:
     def __init__(self, predictions, correct, label, labels, label2idx):
 
         self._label = label
@@ -26,7 +26,7 @@ class Estimator:
     def get_total_f1(labels, y_pred_sent, y_test_sent, encoder):
         true_positive, false_positive, false_negative = 0, 0, 0
         for label in labels:
-            est = Estimator(y_pred_sent, y_test_sent, label, labels, encoder)
+            est = Scorer(y_pred_sent, y_test_sent, label, labels, encoder)
             est.compute_proper_f1()
             true_positive += est._true_positive
             false_positive += est._false_positive

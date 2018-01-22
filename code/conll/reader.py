@@ -6,6 +6,12 @@ from nltk.corpus.reader.api import *
 
 
 class DataReader(CorpusReader):
+    """
+    Отвечает за считывание датасета в формате CoNLL2003
+
+    TODO - Подумать про разбиение на документы!
+    """
+
     WORDS = 'words'
     POS = 'pos'
     TREE = 'tree'

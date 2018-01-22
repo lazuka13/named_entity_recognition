@@ -7,3 +7,5 @@ prepared_data
 
 .npz
 .npy
+
+baselines.txt

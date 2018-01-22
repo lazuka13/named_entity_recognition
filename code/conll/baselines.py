@@ -3,8 +3,8 @@ from sklearn.base import BaseEstimator
 from scipy.sparse import vstack
 
 from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import RandomForestClassifier, \
-    GradientBoostingClassifier
+from sklearn.ensemble import RandomForestClassifier
+from xgboost import XGBClassifier
 from sklearn.svm import LinearSVC
 
 import numpy as np
@@ -20,21 +20,22 @@ import utils
 class TokensClassifier(BaseEstimator):
     """
     Обертка для классификаторов, работающих с отдельными токенами,
-    переводящая их на уровень предложений
+    переводящая их на уровень предложений, чтобы можно было работать
+    с кросс-валидацией в GridSearchCV и получать оценку scorer-а
+
+    TODO - Хотелось бы передавать класс не строкой, но это ломает "copy"
     """
 
     def __init__(self, **params):
         self.cls = params['cls']
         params.pop('cls')
 
-        # TODO Хотелось бы передавать не строками, но пока не очень понятно,
-        # что происходит внутри копирования классификатора (спросить?)
         if self.cls == 'LogisticRegression':
             self.obj = LogisticRegression(**params)
         if self.cls == 'RandomForestClassifier':
             self.obj = RandomForestClassifier(**params)
-        if self.cls == 'GradientBoostingClassifier':
-            self.obj = GradientBoostingClassifier(**params)
+        if self.cls == 'XGBClassifier':
+            self.obj = XGBClassifier(**params)
         if self.cls == 'LinearSVC':
             self.obj = LinearSVC(**params)
 
@@ -127,7 +128,7 @@ def run_baselines(mode):
         y_sent.append(y[index:index + length])
         index += length
 
-    parameters_logistic_regression_demo = [{"C": [1]}]
+    parameters_gradient_boosting_demo = [{"booster": ["gbtree"]}]
     parameters_logistic_regression = [{"C": [0.001, 0.01, 0.1, 1, 10, 100]}]
     parameters_linear_svc = [{"C": [0.001, 0.01, 0.1, 1, 10]}]
 
@@ -153,64 +154,64 @@ def run_baselines(mode):
     file = open('./baselines.txt', 'a+')
 
     if mode == 'demo':
-        file.write('## LogisticRegression DEMO ##\n')
-        file.write(f"started: {dt.datetime.now().strftime()}\n")
-        clf = GridSearchCV(TokensClassifier(cls="LogisticRegression"),
-                           parameters_logistic_regression_demo, n_jobs=-1, cv=3,
+        file.write('## XGBClassifier DEMO ##\n')
+        file.write(f"started: {dt.datetime.now().strftime('%b %d %Y %H:%M:%S')}\n")
+        clf = GridSearchCV(TokensClassifier(cls="XGBClassifier"),
+                           parameters_gradient_boosting_demo, n_jobs=-1, cv=3,
                            refit=refit)
         clf.fit(X_sent, y_sent)
         file.write(f"best parameters: {clf.best_params_}\n")
         file.write(f"best result: {clf.best_score_}\n")
-        file.write(f"ended: {dt.datetime.now().strftime()}\n")
+        file.write(f"ended: {dt.datetime.now().strftime('%b %d %Y %H:%M:%S')}\n")
         file.write("\n")
 
     if mode == 'log' or mode == 'all':
         file.write('## LogisticRegression ##\n')
-        file.write(f"started: {dt.datetime.now().strftime()}\n")
+        file.write(f"started: {dt.datetime.now().strftime('%b %d %Y %H:%M:%S')}\n")
         clf = GridSearchCV(TokensClassifier(cls="LogisticRegression"),
                            parameters_logistic_regression, n_jobs=-1, cv=3,
                            refit=refit)
         clf.fit(X_sent, y_sent)
         file.write(f"best parameters: {clf.best_params_}\n")
         file.write(f"best result: {clf.best_score_}\n")
-        file.write(f"ended: {dt.datetime.now().strftime()}\n")
+        file.write(f"ended: {dt.datetime.now().strftime('%b %d %Y %H:%M:%S')}\n")
         file.write("\n")
 
     if mode == 'svn' or mode == 'all':
         file.write('## LinearSVC ##\n')
-        file.write(f"started: {dt.datetime.now().strftime()}\n")
+        file.write(f"started: {dt.datetime.now().strftime('%b %d %Y %H:%M:%S')}\n")
         clf = GridSearchCV(TokensClassifier(cls="LinearSVC"),
                            parameters_linear_svc,
                            n_jobs=-1, cv=3, refit=refit)
         clf.fit(X_sent, y_sent)
         file.write(f"best parameters: {clf.best_params_}\n")
         file.write(f"best result: {clf.best_score_}\n")
-        file.write(f"ended: {dt.datetime.now().strftime()}\n")
+        file.write(f"ended: {dt.datetime.now().strftime('%b %d %Y %H:%M:%S')}\n")
         file.write("\n")
 
     # TODO использовать XGBoost
     if mode == 'gb' or mode == 'all':
-        file.write('## GradientBoostingClassifier ##\n')
-        file.write(f"started: {dt.datetime.now().strftime()}\n")
-        clf = GridSearchCV(TokensClassifier(cls="GradientBoostingClassifier"),
+        file.write('## XGBClassifier ##\n')
+        file.write(f"started: {dt.datetime.now().strftime('%b %d %Y %H:%M:%S')}\n")
+        clf = GridSearchCV(TokensClassifier(cls="XGBClassifier"),
                            parameters_gradient_boosting,
                            n_jobs=-1, cv=3, refit=refit)
         clf.fit(X_sent, y_sent)
         file.write(f"best parameters: {clf.best_params_}\n")
         file.write(f"best result: {clf.best_score_}\n")
-        file.write(f"ended: {dt.datetime.now().strftime()}\n")
+        file.write(f"ended: {dt.datetime.now().strftime('%b %d %Y %H:%M:%S')}\n")
         file.write("\n")
 
     if mode == 'rf' or mode == 'all':
         file.write('## RandomForestClassifier ##\n')
-        file.write(f"started: {dt.datetime.now().strftime()}\n")
+        file.write(f"started: {dt.datetime.now().strftime('%b %d %Y %H:%M:%S')}\n")
         clf = GridSearchCV(TokensClassifier(cls="RandomForestClassifier"),
                            parameters_random_forest,
                            n_jobs=-1, cv=3, refit=refit)
         clf.fit(X_sent, y_sent)
         file.write(f"best parameters: {clf.best_params_}\n")
         file.write(f"best result: {clf.best_score_}\n")
-        file.write(f"ended: {dt.datetime.now().strftime()}\n")
+        file.write(f"ended: {dt.datetime.now().strftime('%b %d %Y %H:%M:%S')}\n")
         file.write("\n")
 
         file.close()

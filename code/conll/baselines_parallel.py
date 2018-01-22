@@ -9,7 +9,7 @@ from sklearn.model_selection import ParameterGrid
 
 import generator
 import corpus
-import estimator
+import scorer
 import utils
 
 TRAINSET_PATH = "./prepared_data/conll_trainset.npz"
@@ -81,10 +81,10 @@ def run(data):
 
     labels = ["PER", "ORG", "LOC", "MISC"]
     for label in labels:
-        est = estimator.Estimator(y_preda_sent, y_testa_sent, label, labels, encoder)
+        est = scorer.Estimator(y_preda_sent, y_testa_sent, label, labels, encoder)
         results[label] = est.compute_proper_f1()
 
-    results["TOTAL"] = estimator.Estimator.get_total_f1(labels, y_preda_sent, y_testa_sent, encoder)
+    results["TOTAL"] = scorer.Estimator.get_total_f1(labels, y_preda_sent, y_testa_sent, encoder)
     return results
 
 

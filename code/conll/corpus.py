@@ -1,17 +1,7 @@
-from __future__ import unicode_literals
-
-import os
-import codecs
-import textwrap
-
-from six import string_types
-
-from nltk import compat
 from nltk.tree import Tree
 from nltk.util import LazyMap, LazyConcatenation
 from nltk.tag import map_tag
 
-from nltk.corpus.reader.util import *
 from nltk.corpus.reader.api import *
 
 

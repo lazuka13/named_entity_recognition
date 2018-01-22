@@ -13,7 +13,7 @@ import click
 
 import features
 import scorer
-import corpus
+import reader
 import utils
 
 
@@ -105,16 +105,15 @@ class TokensClassifier(BaseEstimator):
 
 
 @click.command()
-@click.option('--mode', '-m', default='demo', help='Mode of running (demo, log, svn, gb, rf, all).')
+@click.option('--mode', '-m', default='demo',
+              help='Mode of running (demo, log, svn, gb, rf, all).')
 def run_baselines(mode):
     print(f"Running in {mode} mode")
 
     dataset_path = "./prepared_data/conll_trainset.npz"
-    dataset = corpus.ConllDataReader('./dataset',
-                                     fileids='eng.train.txt',
-                                     columntypes=('words', 'pos', 'chunk', 'ne'))
-    gen = generator.Generator(column_types=['WORD', 'POS', 'CHUNK'],
-                              context_len=2, language='en')
+    dataset = reader.DataReader('./dataset', fileids='eng.train.txt',
+                                columntypes=('words', 'pos', 'chunk', 'ne'))
+    gen = features.Generator(column_types=['WORD', 'POS', 'CHUNK'], context_len=2, language='en')
 
     y = [el[1] for el in dataset.get_ne()]
     X = gen.fit_transform(dataset.get_tags(tags=['words', 'pos', 'chunk']), y, dataset_path)
@@ -180,7 +179,8 @@ def run_baselines(mode):
     if mode == 'svn' or mode == 'all':
         file.write('## LinearSVC ##\n')
         file.write(f"started: {dt.datetime.now().strftime()}\n")
-        clf = GridSearchCV(TokensClassifier(cls="LinearSVC"), parameters_linear_svc,
+        clf = GridSearchCV(TokensClassifier(cls="LinearSVC"),
+                           parameters_linear_svc,
                            n_jobs=-1, cv=3, refit=refit)
         clf.fit(X_sent, y_sent)
         file.write(f"best parameters: {clf.best_params_}\n")

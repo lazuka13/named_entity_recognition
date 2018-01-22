@@ -1,27 +1,27 @@
+from sklearn import preprocessing
+from scipy.sparse import csr_matrix
+from sklearn.ensemble import ExtraTreesClassifier
+
+from nltk.stem import WordNetLemmatizer
 import pymorphy2
+import numpy
+
+from collections import Counter
 import string
 import re
 import os
 
-from sklearn import preprocessing
-from scipy.sparse import csr_matrix
-from sklearn.ensemble import ExtraTreesClassifier
-from nltk.stem import WordNetLemmatizer
-import numpy as np
-from collections import Counter
-
 
 class Generator:
-
     def __init__(self,
                  column_types=None,
                  context_len=2,
                  language='ru',
-                 number_of_occurences=5,
+                 number_of_occurrences=5,
                  weight_percentage=0.9):
 
         # Частота, ниже которой лейбл считается "редким" #
-        self.NUMBER_OF_OCCURENCES = number_of_occurences
+        self.NUMBER_OF_OCCURRENCES = number_of_occurrences
 
         # Процент веса признаков, который нужно оставить
         self.WEIGHT_PERCENTAGE = weight_percentage  #
@@ -130,9 +130,9 @@ class Generator:
             features_list.append(arr)
 
         # Теперь это массив сырых признаков (в строковом представлении, без отсева) #
-        features_list = np.array([np.array(line) for line in features_list])
+        features_list = numpy.array([numpy.array(line) for line in features_list])
 
-        # Выкинем из этого массива классы, встретившиеся менее NUMBER_OF_OCCURENCES раз #
+        # Выкинем из этого массива классы, встретившиеся менее NUMBER_OF_OCCURRENCES раз #
         # Посчитаем частоту лейблов в столбце #
         self._number_of_columns = features_list.shape[1]
         for u in range(self._number_of_columns):
@@ -149,7 +149,7 @@ class Generator:
         self._multi_encoder = ColumnApplier(
             dict([(i, preprocessing.LabelEncoder()) for i in range(len(features_list[0]))]))
         features_list = self._multi_encoder.fit(features_list, None).transform(features_list)
-        self._enc = preprocessing.OneHotEncoder(dtype=np.int8, sparse=True)
+        self._enc = preprocessing.OneHotEncoder(dtype=numpy.int8, sparse=True)
         self._enc.fit(features_list)
         features_list = self._enc.transform(features_list)
 
@@ -250,9 +250,9 @@ class Generator:
             features_list.append(arr)
 
         # Теперь это массив сырых признаков (в строковом представлении, без отсева) #
-        features_list = np.array([np.array(line) for line in features_list])
+        features_list = numpy.array([numpy.array(line) for line in features_list])
 
-        # Выкинем из этого массива классы, встретившиеся менее NUMBER_OF_OCCURENCES раз #
+        # Выкинем из этого массива классы, встретившиеся менее NUMBER_OF_OCCURRENCES раз #
         self._number_of_columns = features_list.shape[1]
         for y in range(len(features_list)):
             for x in range(self._number_of_columns):
@@ -273,22 +273,22 @@ class Generator:
 
     # Заменяет лейбл на "*", если он "редкий" #
     def get_feature(self, f, feature):
-        if feature in self._counters[f].keys() and self._counters[f][feature] > self.NUMBER_OF_OCCURENCES:
+        if feature in self._counters[f].keys() and self._counters[f][feature] > self.NUMBER_OF_OCCURRENCES:
             return feature
         else:
             return "*"
 
     # Сохраняет матрицу в файл #
     def save_sparse_csr(self, filename, array):
-        np.savez(filename,
-                 data=array.data,
-                 indices=array.indices,
-                 indptr=array.indptr,
-                 shape=array.shape)
+        numpy.savez(filename,
+                    data=array.data,
+                    indices=array.indices,
+                    indptr=array.indptr,
+                    shape=array.shape)
 
     # Загружает матрицу из файла #
     def load_sparse_csr(self, filename):
-        loader = np.load(filename)
+        loader = numpy.load(filename)
         return csr_matrix((loader['data'],
                            loader['indices'],
                            loader['indptr']),

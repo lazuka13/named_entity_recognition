@@ -8,8 +8,6 @@ from nltk.corpus.reader.api import *
 class DataReader(CorpusReader):
     """
     Отвечает за считывание датасета в формате CoNLL2003
-
-    TODO - Подумать про разбиение на документы!
     """
 
     WORDS = 'words'
@@ -56,6 +54,10 @@ class DataReader(CorpusReader):
     def sents(self, fileids=None):
         self._require(self.WORDS)
         return LazyMap(self._get_words, self._grids(fileids))
+
+    def docs(self, fileids=None):
+        self._require(self.WORDS)
+        return LazyMap(self._get_words_sents, self._grids_sents(fileids))
 
     def tagged_words(self, fileids=None, tagset=None):
         self._require(self.WORDS, self.POS)
@@ -206,8 +208,30 @@ class DataReader(CorpusReader):
             grids.append(grid)
         return grids
 
+    def _grids_sents(self, fileids=None):
+        return concat([StreamBackedCorpusView(fileid, self._read_grid_block_sents,
+                                              encoding=enc)
+                       for (fileid, enc) in self.abspaths(fileids, True)])
+
+    def _read_grid_block_sents(self, stream):
+        # grid here contains doc, not sent, and doc contains sent
+        grids = []
+        start_re = re.compile("(-DOCSTART- -X- O O)")
+        for block in read_regexp_block(stream, start_re, None):
+            block = block.lstrip('-DOCSTART- -X- O O\n')
+            block = block.strip()
+            if not block: continue
+            sents = []
+            for sent in block.split('\n\n'):
+                sents.append([line.split() for line in sent.split('\n')])
+            grids.append(sents)
+        return grids
+
     def _get_words(self, grid):
         return self._get_column(grid, self._colmap['words'])
+
+    def _get_words_sents(self, grid):
+        return self._get_column_sents(grid, self._colmap['words'])
 
     def _get_tagged_words(self, grid, tagset=None):
         pos_tags = self._get_column(grid, self._colmap['pos'])
@@ -341,3 +365,7 @@ class DataReader(CorpusReader):
     @staticmethod
     def _get_column(grid, column_index):
         return [grid[i][column_index] for i in range(len(grid))]
+
+    @staticmethod
+    def _get_column_sents(grid, column_index):
+        return [[sent[i][column_index] for i in range(len(sent))] for sent in grid]

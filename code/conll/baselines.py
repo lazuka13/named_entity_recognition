@@ -124,6 +124,8 @@ def run_baselines(mode):
     index = 0
     for sent in dataset.sents():
         length = len(sent)
+        if length == 0:
+            continue
         X_sent.append(X[index:index + length])
         y_sent.append(y[index:index + length])
         index += length

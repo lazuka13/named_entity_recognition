@@ -47,21 +47,23 @@ class TokensClassifier(BaseEstimator):
         :param y_docs: Ответы в формате документов
         :return:
         """
-        X_sent = itertools.chain(*X_docs)
-        y_sent = itertools.chain(*y_docs)
+        # print(X_docs[:2])
+        X_sent = list(itertools.chain.from_iterable(X_docs))
+        y_sent = list(itertools.chain.from_iterable(y_docs))
 
         X = vstack(X_sent, dtype=np.int8)
-        y = itertools.chain(*y_sent)
+        y = list(itertools.chain(*y_sent))
         self.obj.fit(X, y)
         return self
 
     def predict(self, X_docs):
         """
         Отвечает за предсказание ответа на данных
-        :param X_sent: Данные для предсказания в формате документов
+        :param X_docs: Данные для предсказания в формате документов
         :return:
         """
-        X_sent = itertools.chain(*X_docs)
+        # print(X_docs[:2])
+        X_sent = list(itertools.chain.from_iterable(X_docs))
         X = vstack(X_sent, dtype=np.int8)
         y_pred = self.obj.predict(X)
 
@@ -76,26 +78,30 @@ class TokensClassifier(BaseEstimator):
         index = 0
         for doc in X_docs:
             length = len(doc)
+            if length == 0:
+                continue
             y_pred_docs.append(y_pred_sent[index:index + length])
             index += length
 
         return y_pred_docs
 
-    def score(self, X_docs, y_docs):
+    def score(self, X_docs, y_real_docs):
         """
         Отвечает за оценку результатов на некоторых данных
         :param X_docs: Данные для оценки в формате документов
         :param y_docs: Ответ на данных в формате документов
         :return:
         """
-        X_sent = itertools.chain(*X_docs)
-        y_sent = itertools.chain(*y_docs)
+        y_pred_docs = self.predict(X_docs)
+
+        y_pred_sent = list(itertools.chain(*y_pred_docs))
+        y_real_sent = list(itertools.chain(*y_real_docs))
 
         enc = utils.LabelEncoder()
-        y_pred_st = [[enc.get(el) for el in arr] for arr in self.predict(X_sent)]
-        y_real_st = [[enc.get(el) for el in arr] for arr in y_sent]
+        y_pred_sent = [[enc.get(el) for el in arr] for arr in y_pred_sent]
+        y_real_sent = [[enc.get(el) for el in arr] for arr in y_real_sent]
         labels = ["PER", "ORG", "LOC", "MISC"]
-        result = scorer.Scorer.get_total_f1(labels, y_pred_st, y_real_st, enc)
+        result = scorer.Scorer.get_total_f1(labels, y_pred_sent, y_real_sent, enc)
         return result
 
     def get_params(self, deep=True):
@@ -132,8 +138,8 @@ def run_baselines(mode):
     gen = features.Generator(column_types=['WORD', 'POS', 'CHUNK'], context_len=2, language='en')
 
     # В самой простой форме - просто массив слов подряд
-    X = gen.fit_transform(dataset.get_tags(tags=['words', 'pos', 'chunk']), y, dataset_path)
     y = [el[1] for el in dataset.get_ne()]
+    X = gen.fit_transform(dataset.get_tags(tags=['words', 'pos', 'chunk']), y, dataset_path)
 
     # Разбиваем массив на предложения
     X_sent = []
@@ -142,6 +148,8 @@ def run_baselines(mode):
     index = 0
     for sent in dataset.sents():
         length = len(sent)
+        if length == 0:
+            continue
         X_sent.append(X[index:index + length])
         y_sent.append(y[index:index + length])
         index += length
@@ -152,6 +160,8 @@ def run_baselines(mode):
     index = 0
     for doc in dataset.docs():
         length = len(doc)
+        if length == 0:
+            continue
         X_docs.append(X_sent[index:index + length])
         y_docs.append(y_sent[index:index + length])
         index += length

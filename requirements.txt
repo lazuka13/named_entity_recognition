@@ -1,2 +1,7 @@
 nltk==3.2.5
 pymorphy2==0.8
+xgboost
+scipy
+scikit-learn
+numpy
+click

@@ -1,363 +1,405 @@
-from sklearn import preprocessing
-from scipy.sparse import csr_matrix
+from sklearn.preprocessing import LabelEncoder, OneHotEncoder
 from sklearn.ensemble import ExtraTreesClassifier
+from scipy.sparse import csr_matrix
 
 from nltk.stem import WordNetLemmatizer
-import pymorphy2
-import numpy
+from pymorphy2 import MorphAnalyzer
 
-from collections import Counter
+import numpy as np
+
+import collections
+import logging
 import string
 import re
 import os
 
+logger = logging.getLogger('logger')
+
+PUNCT_PATTERN = re.compile("[{}]+$".format(re.escape(string.punctuation)))
+
 
 class Generator:
-    def __init__(self,
-                 column_types=None,
-                 context_len=2,
-                 language='ru',
-                 number_of_occurrences=5,
-                 weight_percentage=0.9):
+    def __init__(self, columntypes=None, context_len=2, language='ru',
+                 rare_count=5, min_weight=0.9, rewrite=False, history=False):
+        """
+        Конструктор генератора признаков
+        :param columntypes: типы столбцов в верной посл-ти, например ['words', 'pos', 'chunk']
+        :param context_len: длина учитываемого контекста
+        :param language: язык датасета
+        :param rare_count: минимально допустимая частота вхождения метки
+        :param min_weight: процент веса признаков, которые оставляем
+        :param rewrite: перезаписывать ли файл с признаками
+        :param history: использовать ли историю предыдущих вхождений
+        """
+        logger.info(f'Параметры генерации признаков: context_len = {context_len}, language = {language}, '
+                    f'rare_count = {rare_count}, min_weight = {min_weight}, history = {history}')
 
-        # Частота, ниже которой лейбл считается "редким" #
-        self.NUMBER_OF_OCCURRENCES = number_of_occurrences
-
-        # Процент веса признаков, который нужно оставить
-        self.WEIGHT_PERCENTAGE = weight_percentage  #
-
-        # Информация о подаваемых столбцах (может быть WORD, POS, CHUNK) #
-        self._column_types = column_types if column_types is not None else ["WORD"]
-
-        # Длина рассматриваемого контекста (context_len влево и context_len вправо) #
+        self._column_types = columntypes
         self._context_len = context_len
+        self._rare_count = rare_count
+        self._min_weight = min_weight
+        self._language = language
+        self._rewrite = rewrite
+        self._history = history
 
-        # Анализатор (для POS-тега и начальной формы) #
-        self._morph = pymorphy2.MorphAnalyzer()
-        self._lemmatizer = WordNetLemmatizer()
+        if self._language == 'ru':
+            class Parser:
+                def __init__(self):
+                    self.inner = MorphAnalyzer()
 
-        # Язык датасета (определяет используемые модули) #
-        self._lang = language
+                def initial(self, token):
+                    return self.inner.parse(token)[0].normal_form
 
-        # OneHotEncoder, хранится после FIT-а #
-        self._enc = None
+                def pos(self, token):
+                    return self.inner.parse(token)[0].tag.POS
 
-        # ColumnApplier, хранится после FIT-а #
-        self._multi_encoder = None
+            self.parser = Parser()
+        else:
+            class Parser:
+                def __init__(self):
+                    self.inner = WordNetLemmatizer()
 
-        # Словари распознаваемых слов, хранятся после FIT-а #
+                def pos(self, token):
+                    raise ValueError('У английского POS есть!')
+
+                def initial(self, token):
+                    return self.inner.lemmatize(token)
+
+            self.parser = Parser()
+
+        self._encoder, self._binarizer = None, None
         self._counters = []
 
-        # Число столбцов в "сырой" матрице признаков #
-        self._number_of_columns = None
+        self._number_of_columns = 0
+        self._columns_to_keep = 0
 
-        # Индексы столбцов признаков, оставленных после отсева #
-        self._columns_to_keep = None
+    def fit_generate(self, data, answers, path, clf=ExtraTreesClassifier()):
+        """
+        Отвечает за генерацию признаков и настройку генератора для отбора верных признаков
+        :param data: данные для генерации признаков
+        :param answers: правильные ответы на данных
+        :param path: путь к файлу для загрузки/сохранения созданных данных
+        :param clf: классификатор для отбора признаков по их весу
+        :return:
+        """
 
-    def fit_transform(self, data, answers, path, clf=ExtraTreesClassifier()):
+        logger.debug('Запущена функция FIT_GENERATE!')
 
-        # Eсли данные сохранены - просто берем их из файла #
-        if os.path.exists(path):
-            sparse_features_list = self.load_sparse_csr(path)
+        if os.path.exists(path) and not self._rewrite:
+            logger.debug('Загружаем разреженную матрицу признаков!')
+            sparse_features_list = self.load_csr(path)
             return sparse_features_list
 
-        # Добавляем пустые "слова" в начало и конец (для контекста) #
-        data = [["" for i in range(len(self._column_types))] for i in range(self._context_len)] + data
-        data = data + [["" for i in range(len(self._column_types))] for i in range(self._context_len)]
+        logger.debug('Приступаем к созданию признаков!')
+        data = [["" for _ in range(len(self._column_types))] for _ in range(self._context_len)] + data
+        data = data + [["" for _ in range(len(self._column_types))] for _ in range(self._context_len)]
 
-        # Находим индексы столбцов в переданных данных #
-        word_index = self._column_types.index("WORD")
-        if "POS" in self._column_types:
-            pos_index = self._column_types.index("POS")
+        logger.debug('Рассчитываем значения для всех элементов датасета')
+        word_index = self._column_types.index("words")
+        word = [(el[word_index]) for el in data]
+        initial = [self.get_initial(el) for el in word]
+        is_punct = [self.get_is_punct(el) for el in word]
+        letters_type = [self.letters_type(el) for el in word]
+        is_number = [self.get_is_number(el) for el in word]
+        if 'pos' in self._column_types:
+            pos_index = self._column_types.index('pos')
+            pos_tag = [(el[pos_index]) for el in data]
         else:
-            pos_index = None
-        if "POS" in self._column_types:
-            chunk_index = self._column_types.index("CHUNK")
+            pos_tag = [self.get_pos_tag(el[word_index]) for el in data]
+        if 'chunk' in self._column_types:
+            chunk_index = self._column_types.index('chunk')
+            chunk_tag = [(el[chunk_index]) for el in data]
         else:
             chunk_index = None
 
-        # Список признаков (строка == набор признаков для слова из массива data) #
+        logger.debug('Учет контекста!')
         features_list = []
 
-        # Заполнение массива features_list "сырыми" данными (без отсева) #
         for k in range(len(data) - 2 * self._context_len):
-            arr = []
+            line = []
             i = k + self._context_len
 
-            if pos_index is not None:
-                pos_arr = [data[i][pos_index]]
-                for j in range(1, self._context_len + 1):
-                    pos_arr.append(data[i - j][pos_index])
-                    pos_arr.append(data[i + j][pos_index])
-            else:
-                pos_arr = [self.get_pos_tag(data[i][word_index])]
-                for j in range(1, self._context_len + 1):
-                    pos_arr.append(self.get_pos_tag(data[i - j][word_index]))
-                    pos_arr.append(self.get_pos_tag(data[i + j][word_index]))
-            arr += pos_arr
+            pos_tag_line = [pos_tag[i]]
+            for j in range(1, self._context_len + 1):
+                pos_tag_line.append(pos_tag[i - j])
+                pos_tag_line.append(pos_tag[i + j])
+            line += pos_tag_line
 
             if chunk_index is not None:
-                chunk_arr = [data[i][chunk_index]]
+                chunk_tag_line = [chunk_tag[i]]
                 for j in range(1, self._context_len + 1):
-                    chunk_arr.append(data[i - j][chunk_index])
-                    chunk_arr.append(data[i + j][chunk_index])
-                arr += chunk_arr
+                    chunk_tag_line.append(chunk_tag[i - j])
+                    chunk_tag_line.append(chunk_tag[i + j])
+                line += chunk_tag_line
 
-            capital_arr = [self.get_capital(data[i][word_index])]
+            letters_type_line = [letters_type[i]]
             for j in range(1, self._context_len + 1):
-                capital_arr.append(self.get_capital(data[i - j][word_index]))
-                capital_arr.append(self.get_capital(data[i + j][word_index]))
-            arr += capital_arr
+                letters_type_line.append(letters_type[i - j])
+                letters_type_line.append(letters_type[i + j])
+            line += letters_type_line
 
-            is_punct_arr = [self.get_is_punct(data[i][word_index])]
+            is_punct_line = [is_punct[i]]
             for j in range(1, self._context_len + 1):
-                is_punct_arr.append(self.get_is_punct(data[i - j][word_index]))
-                is_punct_arr.append(self.get_is_punct(data[i + j][word_index]))
-            arr += is_punct_arr
+                is_punct_line.append(is_punct[i - j])
+                is_punct_line.append(is_punct[i + j])
+            line += is_punct_line
 
-            is_number_arr = [self.get_is_number(data[i][word_index])]
+            is_number_line = [is_number[i]]
             for j in range(1, self._context_len + 1):
-                is_number_arr.append(self.get_is_number(data[i - j][word_index]))
-                is_number_arr.append(self.get_is_number(data[i + j][word_index]))
-            arr += is_number_arr
+                is_number_line.append(is_number[i - j])
+                is_number_line.append(is_number[i + j])
+            line += is_number_line
 
-            initial_arr = [self.get_initial(data[i][word_index])]
+            initial_line = [initial[i]]
             for j in range(1, self._context_len + 1):
-                initial_arr.append(self.get_initial(data[i - j][word_index]))
-                initial_arr.append(self.get_initial(data[i + j][word_index]))
-            arr += initial_arr
+                initial_line.append(initial[i - j])
+                initial_line.append(initial[i + j])
+            line += initial_line
 
-            features_list.append(arr)
+            length_without_history = len(line)
+            line = np.array(line)
 
-        # Теперь это массив сырых признаков (в строковом представлении, без отсева) #
-        features_list = numpy.array([numpy.array(line) for line in features_list])
+            if self._history:
+                history_line = None
+                for a in range(i - 2, -1 if i - 1001 < -1 else i - 1001, -1):
+                    if initial[a] == initial[i] and is_punct[i] == 0 and is_number[i] == 0:
+                        history_line = features_list[a - self._context_len][:length_without_history]
+                        break
+                if history_line is None:
+                    history_line = np.zeros(length_without_history)
+                line = np.append(line, history_line)
 
-        # Выкинем из этого массива классы, встретившиеся менее NUMBER_OF_OCCURRENCES раз #
-        # Посчитаем частоту лейблов в столбце #
+            features_list.append(line)
+        features_list = np.array(features_list)
+        logger.debug(f'Текущий размер матрицы признаков: {features_list.shape[1]}!')
+
+        logger.debug('Подсчет частоты вхождения значений!')
         self._number_of_columns = features_list.shape[1]
         for u in range(self._number_of_columns):
-            arr = features_list[:, u]
-            counter = Counter(arr)
+            col = features_list[:, u]
+            counter = collections.Counter(col)
             self._counters.append(counter)
 
-        # Избавимся от редких лейблов (частота < NUMBER_OF_OCC) #
+        logger.debug(f'Удаление редких значений! Граница - {self._rare_count}!')
         for y in range(len(features_list)):
             for x in range(self._number_of_columns):
                 features_list[y][x] = self.get_feature(x, features_list[y][x])
 
-        # Оставшиеся признаки бинаризуем #
-        self._multi_encoder = ColumnApplier(
-            dict([(i, preprocessing.LabelEncoder()) for i in range(len(features_list[0]))]))
-        features_list = self._multi_encoder.fit(features_list, None).transform(features_list)
-        self._enc = preprocessing.OneHotEncoder(dtype=numpy.int8, sparse=True)
-        self._enc.fit(features_list)
-        features_list = self._enc.transform(features_list)
+        logger.debug('Бинаризация признаков!')
+        self._binarizer = ColumnApplier(
+            dict([(i, LabelEncoder()) for i in range(len(features_list[0]))]))
+        features_list = self._binarizer.fit(features_list, None).transform(features_list)
+        self._encoder = OneHotEncoder(dtype=np.int8, sparse=True)
+        self._encoder.fit(features_list)
+        features_list = self._encoder.transform(features_list)
 
-        # Избавляемся от неинформативных признаков (WEIGHT = WEIGHT_PERC * TOTAL_WEIGHT)#
+        logger.debug(f'Удаление слабо информативных признаков! Граница - {self._min_weight}!')
+
         clf.fit(features_list, answers)
-        features_importances = [(i, el) for i, el in enumerate(clf.feature_importances_)]
-
-        features_importances = sorted(features_importances, key=lambda el: -el[1])
+        features_weight = sorted([(i, el) for i, el in enumerate(clf.feature_importances_)], key=lambda el: -el[1])
         current_weight = 0.0
         self._columns_to_keep = []
-        for el in features_importances:
+        for el in features_weight:
             self._columns_to_keep.append(el[0])
             current_weight += el[1]
-            if current_weight > self.WEIGHT_PERCENTAGE:
+            if current_weight > self._min_weight:
                 break
-
         features_list = features_list[:, self._columns_to_keep]
+        logger.debug(f'Текущий размер матрицы признаков: {features_list.shape[1]}!')
 
-        # Сохраняем матрицу в файл #
-        self.save_sparse_csr(path, features_list)
-
-        # Возвращаем матрицу #
+        logger.debug('Сохраняем разреженную матрицу признаков!')
+        self.save_csr(path, features_list)
         return features_list
 
-    def transform(self, data, path):
+    def generate(self, data, path):
+        """
+        Отвечает за генерацию признаков обученным генератором
+        :param data: данные для генерации признаков
+        :param path: путь к файлу для загрузк/сохранения созданных данных
+        :return:
+        """
 
-        # Eсли данные сохранены - просто берем их из файла #
+        logger.debug('Запущена функция GENERATE!')
+
         if os.path.exists(path):
-            sparse_features_list = self.load_sparse_csr(path)
+            logger.debug('Загружаем разреженную матрицу признаков!')
+            sparse_features_list = self.load_csr(path)
             return sparse_features_list
 
-        # Добавляем пустые "слова" в начало и конец (для контекста) #
-        data = [["" for i in range(len(self._column_types))] for i in range(self._context_len)] + data
-        data = data + [["" for i in range(len(self._column_types))] for i in range(self._context_len)]
+        logger.debug('Приступаем к созданию признаков!')
+        data = [["" for _ in range(len(self._column_types))] for _ in range(self._context_len)] + data
+        data = data + [["" for _ in range(len(self._column_types))] for _ in range(self._context_len)]
 
-        # Находим индексы столбцов в переданных данных #
-        word_index = self._column_types.index("WORD")
-        if "POS" in self._column_types:
-            pos_index = self._column_types.index("POS")
+        logger.debug('Рассчитываем значения для всех элементов датасета')
+        word_index = self._column_types.index("words")
+        word = [(el[word_index]) for el in data]
+        initial = [self.get_initial(el) for el in word]
+        is_punct = [self.get_is_punct(el) for el in word]
+        letters_type = [self.letters_type(el) for el in word]
+        is_number = [self.get_is_number(el) for el in word]
+        if 'pos' in self._column_types:
+            pos_index = self._column_types.index('pos')
+            pos_tag = [(el[pos_index]) for el in data]
         else:
-            pos_index = None
-        if "CHUNK" in self._column_types:
-            chunk_index = self._column_types.index("CHUNK")
+            pos_tag = [self.get_pos_tag(el[word_index]) for el in data]
+        if 'chunk' in self._column_types:
+            chunk_index = self._column_types.index('chunk')
+            chunk_tag = [(el[chunk_index]) for el in data]
         else:
             chunk_index = None
 
-        # Список признаков (строка == набор признаков для слова из массива data) #
+        logger.debug('Учет контекста!')
         features_list = []
 
-        # Заполнение массива features_list "сырыми" данными (без отсева) #
         for k in range(len(data) - 2 * self._context_len):
-            arr = []
+            line = []
             i = k + self._context_len
 
-            if pos_index is not None:
-                pos_arr = [data[i][pos_index]]
-                for j in range(1, self._context_len + 1):
-                    pos_arr.append(data[i - j][pos_index])
-                    pos_arr.append(data[i + j][pos_index])
-            else:
-                pos_arr = [self.get_pos_tag(data[i][word_index])]
-                for j in range(1, self._context_len + 1):
-                    pos_arr.append(self.get_pos_tag(data[i - j][word_index]))
-                    pos_arr.append(self.get_pos_tag(data[i + j][word_index]))
-            arr += pos_arr
+            pos_tag_line = [pos_tag[i]]
+            for j in range(1, self._context_len + 1):
+                pos_tag_line.append(pos_tag[i - j])
+                pos_tag_line.append(pos_tag[i + j])
+            line += pos_tag_line
 
             if chunk_index is not None:
-                chunk_arr = [data[i][chunk_index]]
+                chunk_tag_line = [chunk_tag[i]]
                 for j in range(1, self._context_len + 1):
-                    chunk_arr.append(data[i - j][chunk_index])
-                    chunk_arr.append(data[i + j][chunk_index])
-                arr += chunk_arr
+                    chunk_tag_line.append(chunk_tag[i - j])
+                    chunk_tag_line.append(chunk_tag[i + j])
+                line += chunk_tag_line
 
-            capital_arr = [self.get_capital(data[i][word_index])]
+            letters_type_line = [letters_type[i]]
             for j in range(1, self._context_len + 1):
-                capital_arr.append(self.get_capital(data[i - j][word_index]))
-                capital_arr.append(self.get_capital(data[i + j][word_index]))
-            arr += capital_arr
+                letters_type_line.append(letters_type[i - j])
+                letters_type_line.append(letters_type[i + j])
+            line += letters_type_line
 
-            is_punct_arr = [self.get_is_punct(data[i][word_index])]
+            is_punct_line = [is_punct[i]]
             for j in range(1, self._context_len + 1):
-                is_punct_arr.append(self.get_is_punct(data[i - j][word_index]))
-                is_punct_arr.append(self.get_is_punct(data[i + j][word_index]))
-            arr += is_punct_arr
+                is_punct_line.append(is_punct[i - j])
+                is_punct_line.append(is_punct[i + j])
+            line += is_punct_line
 
-            is_number_arr = [self.get_is_number(data[i][word_index])]
+            is_number_line = [is_number[i]]
             for j in range(1, self._context_len + 1):
-                is_number_arr.append(self.get_is_number(data[i - j][word_index]))
-                is_number_arr.append(self.get_is_number(data[i + j][word_index]))
-            arr += is_number_arr
+                is_number_line.append(is_number[i - j])
+                is_number_line.append(is_number[i + j])
+            line += is_number_line
 
-            initial_arr = [self.get_initial(data[i][word_index])]
+            initial_line = [initial[i]]
             for j in range(1, self._context_len + 1):
-                initial_arr.append(self.get_initial(data[i - j][word_index]))
-                initial_arr.append(self.get_initial(data[i + j][word_index]))
-            arr += initial_arr
+                initial_line.append(initial[i - j])
+                initial_line.append(initial[i + j])
+            line += initial_line
 
-            features_list.append(arr)
+            length_without_history = len(line)
+            line = np.array(line)
 
-        # Теперь это массив сырых признаков (в строковом представлении, без отсева) #
-        features_list = numpy.array([numpy.array(line) for line in features_list])
+            if self._history:
+                history_line = None
+                for a in range(i - 2, -1 if i - 1001 < -1 else i - 1001, -1):
+                    if initial[a] == initial[i] and is_punct[i] == 0 and is_number[i] == 0:
+                        history_line = features_list[a - self._context_len][:length_without_history]
+                        break
+                if history_line is None:
+                    history_line = np.zeros(length_without_history)
+                line = np.append(line, history_line)
 
-        # Выкинем из этого массива классы, встретившиеся менее NUMBER_OF_OCCURRENCES раз #
+            features_list.append(line)
+        features_list = np.array(features_list)
+
+        logger.debug(f'Удаление редких значений! Граница - {self._rare_count}!')
         self._number_of_columns = features_list.shape[1]
         for y in range(len(features_list)):
             for x in range(self._number_of_columns):
                 features_list[y][x] = self.get_feature(x, features_list[y][x])
 
-        # Оставшиеся признаки бинаризуем #
-        features_list = self._multi_encoder.transform(features_list)
-        features_list = self._enc.transform(features_list)
+        logger.debug(f'Бинаризация оставшихся признаков!')
+        features_list = self._binarizer.transform(features_list)
+        features_list = self._encoder.transform(features_list)
 
-        # Избавляемся от неинформативных признаков (WEIGHT = WEIGHT_PERC * TOTAL_WEIGHT)#
+        logger.debug(f'Удаление слабо информативных признаков! Граница - {self._min_weight}!')
         features_list = features_list[:, self._columns_to_keep]
 
-        # Сохраняем матрицу в файл #
-        self.save_sparse_csr(path, features_list)
+        logger.debug('Сохраняем разреженную матрицу признаков!')
+        self.save_csr(path, features_list)
 
-        # Возвращаем матрицу #
         return features_list
 
-    # Заменяет лейбл на "*", если он "редкий" #
-    def get_feature(self, f, feature):
-        if feature in self._counters[f].keys() and self._counters[f][feature] > self.NUMBER_OF_OCCURRENCES:
-            return feature
+    def get_pos_tag(self, token):
+        return self.parser.pos(token)
+
+    @staticmethod
+    def letters_type(token):
+        if PUNCT_PATTERN.match(token):
+            return 1
+        if len(token) == 0:
+            return 1
+        if token.islower():
+            return 2
+        elif token.isupper():
+            return 3
+        elif token[0].isupper() and len(token) == 1:
+            return 4
+        elif token[0].isupper() and token[1:].islower():
+            return 5
         else:
-            return "*"
+            return 6
 
-    # Сохраняет матрицу в файл #
-    def save_sparse_csr(self, filename, array):
-        numpy.savez(filename,
-                    data=array.data,
-                    indices=array.indices,
-                    indptr=array.indptr,
-                    shape=array.shape)
+    @staticmethod
+    def get_is_number(token):
+        try:
+            complex(token)
+        except ValueError:
+            return 1
+        return 2
 
-    # Загружает матрицу из файла #
-    def load_sparse_csr(self, filename):
-        loader = numpy.load(filename)
+    def get_initial(self, token):
+        result = self.parser.initial(token)
+        return result if result is not None else 0
+
+    @staticmethod
+    def get_is_punct(token):
+        if PUNCT_PATTERN.match(token):
+            return 2
+        else:
+            return 1
+
+    @staticmethod
+    def save_csr(filename, array):
+        np.savez(filename,
+                 data=array.data,
+                 indices=array.indices,
+                 indptr=array.indptr,
+                 shape=array.shape)
+
+    @staticmethod
+    def load_csr(filename):
+        loader = np.load(filename)
         return csr_matrix((loader['data'],
                            loader['indices'],
                            loader['indptr']),
                           shape=loader['shape'])
 
-    # Возвращает POS-тег слова #
-    def get_pos_tag(self, token):
-        if self._lang == 'ru':
-            pos = self._morph.parse(token)[0].tag.POS
+    def get_feature(self, f, feature):
+        """
+        Отвечает за избавление от редких признаков
+        :param f:
+        :param feature:
+        :return:
+        """
+        if feature in self._counters[f].keys() and \
+                self._counters[f][feature] > self._rare_count:
+            return feature
         else:
-            pos = None
-        if pos is not None:
-            return pos
-        else:
-            return "none"
-
-    # Возвращает тип регистра слова #
-    def get_capital(self, token):
-        pattern = re.compile("[{}]+$".format(re.escape(string.punctuation)))
-        if pattern.match(token):
-            return "none"
-        if len(token) == 0:
-            return "none"
-        if token.islower():
-            return "lower"
-        elif token.isupper():
-            return "upper"
-        elif token[0].isupper() and len(token) == 1:
-            return "proper"
-        elif token[0].isupper() and token[1:].islower():
-            return "proper"
-        else:
-            return "camel"
-
-    # Признак того, является ли слово числом #
-    def get_is_number(self, token):
-        try:
-            complex(token)
-        except ValueError:
-            return "no"
-        return "yes"
-
-    # Возвращает начальную форму слова #
-    def get_initial(self, token):
-        if self._lang == 'ru':
-            initial = self._morph.parse(token)[0].normal_form
-        else:
-            initial = self._lemmatizer.lemmatize(token)
-
-        if initial is not None:
-            return initial
-        else:
-            return "none"
-
-    # Признак того, является ли слово пунктуацией #
-    def get_is_punct(self, token):
-        pattern = re.compile("[{}]+$".format(re.escape(string.punctuation)))
-        if pattern.match(token):
-            return "yes"
-        else:
-            return "no"
+            return -1
 
 
-# Переводит категории в числовое представление #
 class ColumnApplier(object):
     def __init__(self, column_stages):
         self._column_stages = column_stages
 
-    def fit(self, x, y):
+    def fit(self, x, _):
         for i, k in self._column_stages.items():
             k.fit(x[:, i])
         return self

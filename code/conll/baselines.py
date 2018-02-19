@@ -1,222 +1,119 @@
 from sklearn.model_selection import GridSearchCV
-from sklearn.base import BaseEstimator
-from scipy.sparse import vstack
 
-from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import RandomForestClassifier
-from xgboost import XGBClassifier
-from sklearn.svm import LinearSVC
-
-import numpy as np
 import datetime as dt
+import logging
 import click
 
 import features
-import scorer
 import reader
-import utils
+import os
 
+if not os.path.exists('./logs'):
+    os.mkdir('./logs')
 
-class TokensClassifier(BaseEstimator):
-    """
-    Обертка для классификаторов, работающих с отдельными токенами,
-    переводящая их на уровень предложений, чтобы можно было работать
-    с кросс-валидацией в GridSearchCV и получать оценку scorer-а
+from classifiers.token_classifier import TokenClassifier
 
-    TODO - Хотелось бы передавать класс не строкой, но это ломает "copy"
-    """
+logger = logging.getLogger('logger')
+logger.setLevel(logging.DEBUG)
 
-    def __init__(self, **params):
-        self.cls = params['cls']
-        params.pop('cls')
+fh = logging.FileHandler(f'logs/{dt.datetime.now().strftime("%Y%m%d")}.log', encoding='utf-8')
+fh.setLevel(logging.DEBUG)
 
-        if self.cls == 'LogisticRegression':
-            self.obj = LogisticRegression(**params)
-        if self.cls == 'RandomForestClassifier':
-            self.obj = RandomForestClassifier(**params)
-        if self.cls == 'XGBClassifier':
-            self.obj = XGBClassifier(**params)
-        if self.cls == 'LinearSVC':
-            self.obj = LinearSVC(**params)
+fh_clean = logging.FileHandler(f'logs/{dt.datetime.now().strftime("%Y%m%d")}_clean.log', encoding='utf-8')
+fh_clean.setLevel(logging.INFO)
 
-    def fit(self, X_st, y_st):
-        """
-        Отвечает за обучение внутреннего классификатора
-        :param X_st: Данные в формате предложений
-        :param y_st: Ответы в формате предложений
-        :return:
-        """
-        X = vstack(X_st, dtype=np.int8)
-        y = []
-        for y_el in y_st:
-            y += y_el
-        self.obj.fit(X, y)
-        return self
+ch = logging.StreamHandler()
+ch.setLevel(logging.DEBUG)
 
-    def predict(self, X_st):
-        """
-        Отвечает за предсказание ответа на данных
-        :param X_st: Данные для предсказания в формате предложений
-        :return:
-        """
-        X = vstack(X_st, dtype=np.int8)
-        y_pred = self.obj.predict(X)
-        y_pred_sent = []
-        index = 0
-        for sent in X_st:
-            length = sent.shape[0]
-            y_pred_sent.append(y_pred[index:index + length])
-            index += length
-        return y_pred_sent
+formatter = logging.Formatter('%(asctime)s %(levelname)s - %(message)s',
+                              datefmt='%H:%M:%S')
+fh.setFormatter(formatter)
+fh_clean.setFormatter(formatter)
+ch.setFormatter(formatter)
 
-    def score(self, X_st, y_st):
-        """
-        Отвечает за оценку результатов на некоторых данных
-        :param X_st: Данные для оценки в формате предложений
-        :param y_st: Ответ на данных в формате предложений
-        :return:
-        """
-        enc = utils.LabelEncoder()
-        y_pred_st = [[enc.get(el) for el in arr] for arr in self.predict(X_st)]
-        y_real_st = [[enc.get(el) for el in arr] for arr in y_st]
-        labels = ["PER", "ORG", "LOC", "MISC"]
-        result = scorer.Scorer.get_total_f1(labels, y_pred_st, y_real_st, enc)
-        return result
-
-    def get_params(self, deep=True):
-        """
-        Отвечает за получение параметров внутреннего классификатора
-        :param deep:
-        :return:
-        """
-        params = self.obj.get_params()
-        params['cls'] = self.cls
-        return params
-
-    def set_params(self, **params):
-        """
-        Отвечает за установку параметров внутреннего классификатора
-        :param params:
-        :return:
-        """
-        if 'cls' in params:
-            params.pop('cls')
-        self.obj.set_params(**params)
-        return self
+logger.addHandler(fh)
+logger.addHandler(fh_clean)
+logger.addHandler(ch)
 
 
 @click.command()
 @click.option('--mode', '-m', default='demo',
-              help='Mode of running (demo, log, svn, gb, rf, all).')
+              help='Mode of running (log, svn, gb, rf).')
 def run_baselines(mode):
-    print(f"Running in {mode} mode")
+    definitions = {
+        'log': {
+            'clf': 'LogisticRegression',
+            'parameters': [{"C": [0.001, 0.01, 0.1, 1, 10]}]
+        },
+        'svn': {
+            'clf': 'LinearSVC',
+            'parameters': [{"C": [0.001, 0.01, 0.1, 1, 10]}]
+        },
+        'gb': {
+            'clf': 'XGBClassifier',
+            'parameters': [{"booster": ['gbtree', 'gblinear'],
+                            'learning_rate': [0.01, 0.05, 0.1, 0.2, 0.3, 0.4],
+                            'max_depth': [3, 6, 10, 15],
+                            'colsample_bytree': [0.5, 0.8, 1],
+                            'colsample_bylevel': [0.5, 0.8, 1]}]
+        },
+        'rf': {
+            'clf': 'RandomForestClassifier',
+            'parameters': [{
+                "criterion": ["gini"],
+                "n_estimators": [500],
+                "max_features": ['sqrt'],
+            }]
+        }
+    }
 
-    dataset_path = "./prepared_data/conll_trainset.npz"
+    logger.info(f'Подсчет baseline-ов с классификатором {definitions[mode]["clf"]}!')
     dataset = reader.DataReader('./dataset', fileids='eng.train.txt',
                                 columntypes=('words', 'pos', 'chunk', 'ne'))
-    gen = features.Generator(column_types=['WORD', 'POS', 'CHUNK'], context_len=2, language='en')
+    gen = features.Generator(columntypes=('words', 'pos', 'chunk'), context_len=2, language='en',
+                             rare_count=5, min_weight=0.95, rewrite=True, history=True)
 
+    logger.debug(f"Загружаем признаки для обучения!")
     y = [el[1] for el in dataset.get_ne()]
-    X = gen.fit_transform(dataset.get_tags(tags=['words', 'pos', 'chunk']), y, dataset_path)
-    X_sent = []
-    y_sent = []
+    x = gen.fit_generate(dataset.get_tags(tags=['words', 'pos', 'chunk']), y,
+                         "./prepared_data/conll_trainset.npz")
 
+    logger.debug(f"Переводим данные в формат документов!")
+    x_sent, y_sent = [], []
     index = 0
     for sent in dataset.sents():
         length = len(sent)
         if length == 0:
             continue
-        X_sent.append(X[index:index + length])
+        x_sent.append(x[index:index + length])
         y_sent.append(y[index:index + length])
         index += length
-
-    parameters_gradient_boosting_demo = [{"booster": ["gbtree"]}]
-    parameters_logistic_regression = [{"C": [0.001, 0.01, 0.1, 1, 10, 100]}]
-    parameters_linear_svc = [{"C": [0.001, 0.01, 0.1, 1, 10]}]
-
-    parameters_gradient_boosting = [{
-        'max_depth': [5, 10, 15],
-        'min_samples_split': [200, 500, 1000],
-        'n_estimators': [10, 50, 100, 500],
-        'max_features': [0.5, 0.75, 0.90],
-        'subsample': [0.6, 0.8, 0.9]
-    }]
-
-    parameters_random_forest = [{
-        "criterion": ["gini", "entropy"],
-        "n_estimators": [100, 500, 1000],
-        "max_depth": [3, 5],
-        "min_samples_split": [15, 20],
-        "min_samples_leaf": [5, 10],
-        "max_leaf_nodes": [20, 40],
-        "min_weight_fraction_leaf": [0.1]
-    }]
+    x_docs, y_docs = [], []
+    index = 0
+    for doc in dataset.docs():
+        length = len(doc)
+        if length == 0:
+            continue
+        x_docs.append(x_sent[index:index + length])
+        y_docs.append(y_sent[index:index + length])
+        index += length
 
     refit = False
-    file = open('./baselines.txt', 'a+')
-
-    if mode == 'demo':
-        file.write('## XGBClassifier DEMO ##\n')
+    with open('./baselines.txt', 'a+') as file:
+        logger.debug(f"Начинаем прогон параметров при помощи GridSearchCV!")
+        file.write(f'## {definitions[mode]["clf"]} ##\n')
         file.write(f"started: {dt.datetime.now().strftime('%b %d %Y %H:%M:%S')}\n")
-        clf = GridSearchCV(TokensClassifier(cls="XGBClassifier"),
-                           parameters_gradient_boosting_demo, n_jobs=-1, cv=3,
+        clf = GridSearchCV(TokenClassifier(cls=definitions[mode]["clf"]),
+                           definitions[mode]["parameters"], n_jobs=4, cv=3,
                            refit=refit)
-        clf.fit(X_sent, y_sent)
+        clf.fit(x_docs, y_docs)
         file.write(f"best parameters: {clf.best_params_}\n")
         file.write(f"best result: {clf.best_score_}\n")
         file.write(f"ended: {dt.datetime.now().strftime('%b %d %Y %H:%M:%S')}\n")
         file.write("\n")
-
-    if mode == 'log' or mode == 'all':
-        file.write('## LogisticRegression ##\n')
-        file.write(f"started: {dt.datetime.now().strftime('%b %d %Y %H:%M:%S')}\n")
-        clf = GridSearchCV(TokensClassifier(cls="LogisticRegression"),
-                           parameters_logistic_regression, n_jobs=-1, cv=3,
-                           refit=refit)
-        clf.fit(X_sent, y_sent)
-        file.write(f"best parameters: {clf.best_params_}\n")
-        file.write(f"best result: {clf.best_score_}\n")
-        file.write(f"ended: {dt.datetime.now().strftime('%b %d %Y %H:%M:%S')}\n")
-        file.write("\n")
-
-    if mode == 'svn' or mode == 'all':
-        file.write('## LinearSVC ##\n')
-        file.write(f"started: {dt.datetime.now().strftime('%b %d %Y %H:%M:%S')}\n")
-        clf = GridSearchCV(TokensClassifier(cls="LinearSVC"),
-                           parameters_linear_svc,
-                           n_jobs=-1, cv=3, refit=refit)
-        clf.fit(X_sent, y_sent)
-        file.write(f"best parameters: {clf.best_params_}\n")
-        file.write(f"best result: {clf.best_score_}\n")
-        file.write(f"ended: {dt.datetime.now().strftime('%b %d %Y %H:%M:%S')}\n")
-        file.write("\n")
-
-    # TODO использовать XGBoost
-    if mode == 'gb' or mode == 'all':
-        file.write('## XGBClassifier ##\n')
-        file.write(f"started: {dt.datetime.now().strftime('%b %d %Y %H:%M:%S')}\n")
-        clf = GridSearchCV(TokensClassifier(cls="XGBClassifier"),
-                           parameters_gradient_boosting,
-                           n_jobs=-1, cv=3, refit=refit)
-        clf.fit(X_sent, y_sent)
-        file.write(f"best parameters: {clf.best_params_}\n")
-        file.write(f"best result: {clf.best_score_}\n")
-        file.write(f"ended: {dt.datetime.now().strftime('%b %d %Y %H:%M:%S')}\n")
-        file.write("\n")
-
-    if mode == 'rf' or mode == 'all':
-        file.write('## RandomForestClassifier ##\n')
-        file.write(f"started: {dt.datetime.now().strftime('%b %d %Y %H:%M:%S')}\n")
-        clf = GridSearchCV(TokensClassifier(cls="RandomForestClassifier"),
-                           parameters_random_forest,
-                           n_jobs=-1, cv=3, refit=refit)
-        clf.fit(X_sent, y_sent)
-        file.write(f"best parameters: {clf.best_params_}\n")
-        file.write(f"best result: {clf.best_score_}\n")
-        file.write(f"ended: {dt.datetime.now().strftime('%b %d %Y %H:%M:%S')}\n")
-        file.write("\n")
-
-        file.close()
+    logger.debug(f"Прогон параметров завершен!")
+    logger.info(f"Лучшие параметры: {clf.best_params_}")
+    logger.info(f"Достигнутый результат: {clf.best_score_}\n")
 
 
 if __name__ == '__main__':

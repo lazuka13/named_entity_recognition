@@ -9,3 +9,5 @@ prepared_data
 .npy
 
 baselines.txt
+
+/logs

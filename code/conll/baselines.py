@@ -74,9 +74,9 @@ def run_baselines(mode):
                              rare_count=5, min_weight=0.95, rewrite=True, history=True)
 
     logger.debug(f"Загружаем признаки для обучения!")
+
     y = [el[1] for el in dataset.get_ne()]
-    x = gen.fit_generate(dataset.get_tags(tags=['words', 'pos', 'chunk']), y,
-                         "./prepared_data/conll_trainset.npz")
+    x = dataset.get_tags(tags=['words', 'pos', 'chunk'])
 
     logger.debug(f"Переводим данные в формат документов!")
     x_sent, y_sent = [], []
@@ -97,6 +97,8 @@ def run_baselines(mode):
         x_docs.append(x_sent[index:index + length])
         y_docs.append(y_sent[index:index + length])
         index += length
+
+    x_docs = gen.fit_generate(x_docs, y_docs, "./prepared_data/conll_trainset.npz")
 
     refit = False
     with open('./baselines.txt', 'a+') as file:

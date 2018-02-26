@@ -1,0 +1,31 @@
+\section{Статьи, рассматривающие "глобальные" признаки}
+
+Приведем краткий обзор статей, в которых так или иначе использовались "нелокальные" (иначе глобальные) признаки. 
+
+Так, в статье "Design Challenges and Misconceptions in Named Entity Recognition" \cite{ratinov-roth:2009:CoNLL} рассказывается про то, как авторы объединили идеи из статей "Named Entity Recognition with a Maximum Entropy Approach" \cite{Chieu:2003:NER:1119176.1119199} (использование так называемых глобальных списков), "An Effective Two-Stage Model for Exploiting Non-Local Dependencies in Named Entity Recognition" \cite{krishnan-manning:2006:COLACL} (главная идея которой была в том, чтобы сначала применить baseline-систему к датасету, а потом использовать результаты как признаки), а также использовали идею "Extended prediction history" (использование истории о предыдущих предсказанных классах для токена на протяжении 1000 токенов).
+
+Авторы статьи сумели добиться хорошего результата в 90.8. 
+
+\iffalse
+
+Рассмотрим подробнее идею глобальных списков из первой статьи. В процессе обработки датасета создаются следующие листы:
+\begin{enumerate}
+    \item Frequent Word List - слова, встречающиеся более чем в пяти документах.
+    \item Useful Unigrams - For each name class, words that precede the name class are ranked using correlation metric (Chieu and Ng, 2002a), and the top 20 are compiled into a list.
+    \item Useful Bigrams - (UBI) This list consists of bigrams of words that precede a name class. Examples are “CITY OF”, “ARRIVES IN”, etc. The list is compiled by taking bigrams with higher probability to appear before a name class than the unigram itself (e.g., “CITY OF” has higher probability to appear before a location than “OF”). A list is collected for each name class.
+    \item Useful Word Suffixes - (SUF) For each word in a name class, three-letter suffixes with high correlation metric score are collected.
+    \item Useful Name Class Suffixes - A suffix list is compiled for each name class. These lists capture tokens that frequently terminate a particular name class.
+    \item Function Words - Lower case words that occur within a name class. These include “van der”, “of”, etc.
+\end{enumerate}
+
+После чего на основании полученных листов получаются глобальные признаки:
+
+\begin{enumerate}
+    \item Unigrams - If another occurrence of w in the same document has a previous word wp that can be found in UNI, then these words are used as features Other- occurrence-prev=wp.
+    \item Bigrams - If another occurrence of w has the feature BI-nc set to 1, then w will have the feature OtherBI-nc set to 1.
+    \item Class Suffixes - If another occurrence of w has the feature NCS-nc set to 1, then w will have the feature OtherNCS-nc set to 1.
+    \item InitCaps of Other Occurrences - This feature checks for whether the first occurrence of the same word in an unambiguous position (non first-words in the TXT zone) in the same document is initCaps or not. For a word whose initCaps might be due to its position rather than its meaning (in headlines, first word of a sentence, etc), the case information of other occurrences might be more accurate than its own.
+    \item Name Class of Previous Occurrences - The name class of previous occurrences of w is used as a feature, similar to (Zhou and Su, 2002). We use the occurrence where w is part of the longest name class phrase (name class with the most number of tokens).
+\end{enumerate}
+
+\fi

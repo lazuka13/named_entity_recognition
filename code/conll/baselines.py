@@ -43,7 +43,7 @@ def run_baselines(mode):
     definitions = {
         'log': {
             'clf': 'LogisticRegression',
-            'parameters': [{"C": [0.001, 0.01, 0.1, 1, 10]}]
+            'parameters': [{"C": [10]}]
         },
         'svn': {
             'clf': 'LinearSVC',
@@ -71,7 +71,7 @@ def run_baselines(mode):
     dataset = reader.DataReader('./dataset', fileids='eng.train.txt',
                                 columntypes=('words', 'pos', 'chunk', 'ne'))
     gen = features.Generator(columntypes=('words', 'pos', 'chunk'), context_len=2, language='en',
-                             rare_count=5, min_weight=0.95, rewrite=True, history=True)
+                             rare_count=5, min_weight=0.95, rewrite=True, history=False)
 
     logger.debug(f"Загружаем признаки для обучения!")
 
@@ -98,7 +98,24 @@ def run_baselines(mode):
         y_docs.append(y_sent[index:index + length])
         index += length
 
-    x_docs = gen.fit_generate(x_docs, y_docs, "./prepared_data/conll_trainset.npz")
+    x = gen.fit_generate(x_docs, y_docs, "./prepared_data/conll_trainset.npz")
+    x_sent = []
+    index = 0
+    for sent in dataset.sents():
+        length = len(sent)
+        if length == 0:
+            continue
+        x_sent.append(x[index:index + length])
+        index += length
+
+    x_docs = []
+    index = 0
+    for doc in dataset.docs():
+        length = len(doc)
+        if length == 0:
+            continue
+        x_docs.append(x_sent[index:index + length])
+        index += length
 
     refit = False
     with open('./baselines.txt', 'a+') as file:
@@ -107,7 +124,7 @@ def run_baselines(mode):
         file.write(f"started: {dt.datetime.now().strftime('%b %d %Y %H:%M:%S')}\n")
         clf = GridSearchCV(TokenClassifier(cls=definitions[mode]["clf"]),
                            definitions[mode]["parameters"], n_jobs=4, cv=3,
-                           refit=refit)
+                           refit=refit, verbose=0)
         clf.fit(x_docs, y_docs)
         file.write(f"best parameters: {clf.best_params_}\n")
         file.write(f"best result: {clf.best_score_}\n")

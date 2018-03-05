@@ -1,6 +1,8 @@
-from sklearn.base import BaseEstimator
-
 import itertools
+from uuid import uuid4
+
+import pycrfsuite
+from sklearn.base import BaseEstimator
 
 import scorer
 import utils
@@ -15,10 +17,12 @@ class SequenceClassifier(BaseEstimator):
 
     def __init__(self, **params):
         self.cls = params['cls']
+        self.file_name = str(uuid4()) + '.crfsuite'
         params.pop('cls')
 
-        if self.cls == 'LogisticRegression':
-            self.obj = "LogisticRegression(**params)"
+        if self.cls == 'CRF':
+            self.trainer_obj = pycrfsuite.Trainer(verbose=False)
+            self.tagger_obj = pycrfsuite.Tagger()
 
     def fit(self, x_docs, y_docs):
         """
@@ -27,10 +31,13 @@ class SequenceClassifier(BaseEstimator):
         :param y_docs: Ответы в формате документов
         :return:
         """
-        x_sent = list(itertools.chain.from_iterable(x_docs))
-        y_sent = list(itertools.chain.from_iterable(y_docs))
+        x_sents = list(itertools.chain.from_iterable(x_docs))
+        y_sents = list(itertools.chain.from_iterable(y_docs))
 
-        self.obj.fit(x_sent, y_sent)
+        for x_sent, y_sent in zip(x_sents, y_sents):
+            self.trainer_obj.append(x_sent, y_sent)
+
+        self.trainer_obj.train(model=self.file_name)
         return self
 
     def predict(self, x_docs):
@@ -39,9 +46,12 @@ class SequenceClassifier(BaseEstimator):
         :param x_docs: Данные для предсказания в формате документов
         :return:
         """
-        x_sent = list(itertools.chain.from_iterable(x_docs))
+        x_sents = list(itertools.chain.from_iterable(x_docs))
 
-        y_pred_sent = self.obj.predict(x_sent)
+        self.tagger_obj.open(self.file_name)
+        y_pred_sents = []
+        for x_sent in x_sents:
+            y_pred_sents.append(self.tagger_obj.tag(x_sent))
 
         y_pred_docs = []
         index = 0
@@ -49,7 +59,7 @@ class SequenceClassifier(BaseEstimator):
             length = len(doc)
             if length == 0:
                 continue
-            y_pred_docs.append(y_pred_sent[index:index + length])
+            y_pred_docs.append(y_pred_sents[index:index + length])
             index += length
 
         return y_pred_docs
@@ -79,7 +89,7 @@ class SequenceClassifier(BaseEstimator):
         :param deep:
         :return:
         """
-        params = self.obj.get_params()
+        params = self.trainer_obj.get_params()
         params['cls'] = self.cls
         return params
 
@@ -91,5 +101,5 @@ class SequenceClassifier(BaseEstimator):
         """
         if 'cls' in params:
             params.pop('cls')
-        self.obj.set_params(**params)
+        self.trainer_obj.set_params(**params)
         return self

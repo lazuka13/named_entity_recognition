@@ -71,7 +71,7 @@ def run_baselines(mode):
     dataset = reader.DataReader('./dataset', fileids='eng.train.txt',
                                 columntypes=('words', 'pos', 'chunk', 'ne'))
     gen = features.Generator(columntypes=('words', 'pos', 'chunk'), context_len=2, language='en',
-                             rare_count=5, min_weight=0.95, rewrite=True, history=False)
+                             rare_count=5, min_weight=0.95, rewrite=True, history=True)
 
     logger.debug(f"Загружаем признаки для обучения!")
 

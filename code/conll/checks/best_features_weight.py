@@ -24,7 +24,8 @@ logger.addHandler(ch)
 
 
 def run_best_features_weight():
-    possible_weights = [i / 100 for i in range(80, 100, 1)]
+    possible_weights = [i / 100 for i in range(80, 90, 1)] + \
+                       [i / 200 for i in range(180, 201, 1)]
     results = []
 
     for possible_weight in possible_weights:
@@ -34,8 +35,7 @@ def run_best_features_weight():
                                  rare_count=5, min_weight=possible_weight, rewrite=True, history=True)
 
         y = [el[1] for el in dataset.get_ne()]
-        x = gen.fit_generate(dataset.get_tags(tags=['words', 'pos', 'chunk']), y,
-                             "../prepared_data/conll_trainset.npz")
+        x = dataset.get_tags(tags=['words', 'pos', 'chunk'])
 
         x_sent, y_sent = [], []
         index = 0
@@ -56,14 +56,32 @@ def run_best_features_weight():
             y_docs.append(y_sent[index:index + length])
             index += length
 
+        x = gen.fit_generate(x_docs, y_docs, "../prepared_data/conll_trainset.npz")
+        x_sent = []
+        index = 0
+        for sent in dataset.sents():
+            length = len(sent)
+            if length == 0:
+                continue
+            x_sent.append(x[index:index + length])
+            index += length
+
+        x_docs = []
+        index = 0
+        for doc in dataset.docs():
+            length = len(doc)
+            if length == 0:
+                continue
+            x_docs.append(x_sent[index:index + length])
+            index += length
+
         clf = TokenClassifier(cls='XGBClassifier')
         clf.set_params(booster='gbtree', colsample_bylevel=0.5, colsample_bytree=0.5, learning_rate=0.3, max_depth=14)
         results.append(np.mean(cross_val_score(clf, x_docs, y_docs, n_jobs=-1)))
-    print(possible_weights)
-    print(results)
-    plt.plot(possible_weights, results)
-    plt.savefig('./graph.png')
+    return possible_weights, results
 
 
 if __name__ == '__main__':
-    run_best_features_weight()
+    possible_weights, results = run_best_features_weight()
+    plt.plot(possible_weights, results)
+    plt.savefig('./graph.png')

@@ -223,6 +223,7 @@ class Generator:
         features_list = np.array(features_list)
 
         logger.debug(f'Генерация исходных признаков завершена!')
+        logger.debug(f'Для каждого токена создано {features_list.shape[1]} признаков!')
         logger.debug(f'Обработано {total_count} токенов!')
         logger.debug(f'{history_count} токенов имеют историю в рамках документа!')
 
@@ -264,6 +265,8 @@ class Generator:
                     indexes.append(index)
             features_indexes_encoded[key] = indexes
             logger.debug(f'В категории {key} осталось {len(indexes)} признаков, было {len(value)} признаков!')
+            if len(indexes) == 0:
+                continue
             weights = []
             for index in indexes:
                 weights.append(clf.feature_importances_[index])
@@ -420,45 +423,45 @@ class Generator:
     @staticmethod
     def letters_type(token):
         if PUNCT_PATTERN.match(token):
-            return 1
+            return np.int8(1)
         if len(token) == 0:
-            return 1
+            return np.int8(1)
         if token.islower():
-            return 2
+            return np.int8(2)
         elif token.isupper():
-            return 3
+            return np.int8(3)
         elif token[0].isupper() and len(token) == 1:
-            return 4
+            return np.int8(4)
         elif token[0].isupper() and token[1:].islower():
-            return 5
+            return np.int8(5)
         else:
-            return 6
+            return np.int8(6)
 
     @staticmethod
     def get_is_number(token):
         try:
             complex(token)
         except ValueError:
-            return 1
-        return 2
+            return np.int8(1)
+        return np.int8(1)
 
     def get_initial(self, token):
         result = self.parser.initial(token)
-        return result if result is not None else 0
+        return result if result is not None else np.int8(0)
 
     def get_initial_counted(self, token):
         result = self.parser.initial(token)
         if result is not None and self.counter[result] > self._rare_count:
             return result
         else:
-            return 0
+            return np.int8(0)
 
     @staticmethod
     def get_is_punct(token):
         if PUNCT_PATTERN.match(token):
-            return 2
+            return np.int8(2)
         else:
-            return 1
+            return np.int8(1)
 
     @staticmethod
     def save_csr(filename, array):

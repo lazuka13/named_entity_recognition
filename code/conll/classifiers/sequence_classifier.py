@@ -1,7 +1,7 @@
 import itertools
 from uuid import uuid4
 
-import pycrfsuite
+import sklearn_crfsuite
 from sklearn.base import BaseEstimator
 
 import scorer
@@ -21,8 +21,13 @@ class SequenceClassifier(BaseEstimator):
         params.pop('cls')
 
         if self.cls == 'CRF':
-            self.trainer_obj = pycrfsuite.Trainer(verbose=False)
-            self.tagger_obj = pycrfsuite.Tagger()
+            self.obj = sklearn_crfsuite.CRF(
+                algorithm='lbfgs',
+                c1=0.1,
+                c2=0.1,
+                max_iterations=100,
+                all_possible_transitions=True
+            )
 
     def fit(self, x_docs, y_docs):
         """
@@ -34,10 +39,7 @@ class SequenceClassifier(BaseEstimator):
         x_sents = list(itertools.chain.from_iterable(x_docs))
         y_sents = list(itertools.chain.from_iterable(y_docs))
 
-        for x_sent, y_sent in zip(x_sents, y_sents):
-            self.trainer_obj.append(x_sent, y_sent)
-
-        self.trainer_obj.train(model=self.file_name)
+        self.obj.fit(x_sents, y_sents)
         return self
 
     def predict(self, x_docs):
@@ -48,10 +50,7 @@ class SequenceClassifier(BaseEstimator):
         """
         x_sents = list(itertools.chain.from_iterable(x_docs))
 
-        self.tagger_obj.open(self.file_name)
-        y_pred_sents = []
-        for x_sent in x_sents:
-            y_pred_sents.append(self.tagger_obj.tag(x_sent))
+        y_pred_sents = self.obj.predict(x_sents)
 
         y_pred_docs = []
         index = 0
@@ -89,7 +88,7 @@ class SequenceClassifier(BaseEstimator):
         :param deep:
         :return:
         """
-        params = self.trainer_obj.get_params()
+        params = self.obj.get_params()
         params['cls'] = self.cls
         return params
 
@@ -101,5 +100,5 @@ class SequenceClassifier(BaseEstimator):
         """
         if 'cls' in params:
             params.pop('cls')
-        self.trainer_obj.set_params(**params)
+        self.obj.set_params(**params)
         return self

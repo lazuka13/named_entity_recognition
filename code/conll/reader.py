@@ -216,9 +216,12 @@ class DataReader(CorpusReader):
     def _read_grid_block_sents(self, stream):
         # grid here contains doc, not sent, and doc contains sent
         grids = []
-        start_re = re.compile("(-DOCSTART- -X- O O)")
+        start_re = re.compile("(-DOCSTART-)")
         for block in read_regexp_block(stream, start_re, None):
-            block = block.lstrip('-DOCSTART- -X- O O\n')
+            if block.startswith('-DOCSTART- -X- O O\n'):
+                block = block.lstrip('-DOCSTART- -X- O O\n')
+            else:
+                block = block.lstrip('-DOCSTART- -X- -X- O\n')
             block = block.strip()
             if not block: continue
             sents = []

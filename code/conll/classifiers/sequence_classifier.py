@@ -19,14 +19,20 @@ class SequenceClassifier(BaseEstimator):
         self.cls = params['cls']
         self.file_name = str(uuid4()) + '.crfsuite'
         params.pop('cls')
+        
+        algorithm = params['algorithm'] if 'algorithm' in params else 'lbfgs'
+        c1 = params['c1'] if 'c1' in params else 0.1
+        c2 = params['c2'] if 'c2' in params else 0.1
+        max_iterations = params['max_iterations'] if 'max_iterations' in params else 100
+        all_possible_transitions = params['all_possible_transitions'] if 'all_possible_transitions' in params else True
 
         if self.cls == 'CRF':
             self.obj = sklearn_crfsuite.CRF(
-                algorithm='lbfgs',
-                c1=0.1,
-                c2=0.1,
-                max_iterations=100,
-                all_possible_transitions=True
+                algorithm=algorithm,
+                c1=c1,
+                c2=c2,
+                max_iterations=max_iterations,
+                all_possible_transitions=all_possible_transitions
             )
 
     def fit(self, x_docs, y_docs):
@@ -81,6 +87,24 @@ class SequenceClassifier(BaseEstimator):
         labels = ["PER", "ORG", "LOC", "MISC"]
         result = scorer.Scorer.get_total_f1(labels, y_pred_sent, y_real_sent, enc)
         return result
+    
+    def get_full_score(self, x_docs, y_real_docs):
+        """
+        Отвечает за получение полного отчета
+        :param x_docs: Данные для оценки в формате документов
+        :param y_real_docs: Ответ на данных в формате документов
+        :return:
+        """
+        y_pred_docs = self.predict(x_docs)
+
+        y_pred_sent = list(itertools.chain(*y_pred_docs))
+        y_real_sent = list(itertools.chain(*y_real_docs))
+
+        enc = utils.LabelEncoder()
+        y_pred_sent = [[enc.get(el) for el in arr] for arr in y_pred_sent]
+        y_real_sent = [[enc.get(el) for el in arr] for arr in y_real_sent]
+        labels = ["PER", "ORG", "LOC", "MISC"]
+        scorer.Scorer.get_full_score(labels, y_pred_sent, y_real_sent, enc)
 
     def get_params(self, deep=True):
         """

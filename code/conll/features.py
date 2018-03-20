@@ -219,7 +219,6 @@ class Generator:
                 first_time = False
             features_list += doc_features_list
 
-
         features_list = np.array(features_list)
 
         logger.debug(f'Генерация исходных признаков завершена!')
@@ -322,7 +321,7 @@ class Generator:
             logger.debug('Рассчитываем значения для всех элементов датасета')
             word_index = self._column_types.index("words")
             word = [(el[word_index]) for el in x_doc]
-            initial = [self.get_initial(el) for el in word]
+            initial = [self.get_initial_counted(el) for el in word]
             is_punct = [self.get_is_punct(el) for el in word]
             letters_type = [self.letters_type(el) for el in word]
             is_number = [self.get_is_number(el) for el in word]
@@ -399,11 +398,11 @@ class Generator:
 
         features_list = np.array(features_list)
 
-        logger.debug(f'Удаление редких значений! Граница - {self._rare_count}!')
-        self._number_of_columns = features_list.shape[1]
-        for s in range(len(features_list)):
-            for m in range(self._number_of_columns):
-                features_list[s][m] = self.get_feature(m, features_list[s][m])
+        # logger.debug(f'Удаление редких значений! Граница - {self._rare_count}!')
+        # self._number_of_columns = features_list.shape[1]
+        # for s in range(len(features_list)):
+        #    for m in range(self._number_of_columns):
+        #        features_list[s][m] = self.get_feature(m, features_list[s][m])
 
         logger.debug(f'Бинаризация оставшихся признаков!')
         features_list = self._binarizer.transform(features_list)

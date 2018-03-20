@@ -83,5 +83,7 @@ def run_best_features_weight():
 
 if __name__ == '__main__':
     possible_weights, results = run_best_features_weight()
+    print('possible_weights', possible_weights)
+    print('results', results)
     plt.plot(possible_weights, results)
     plt.savefig('./graph.png')

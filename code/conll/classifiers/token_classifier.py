@@ -97,6 +97,24 @@ class TokenClassifier(BaseEstimator):
         labels = ["PER", "ORG", "LOC", "MISC"]
         result = scorer.Scorer.get_total_f1(labels, y_pred_sent, y_real_sent, enc)
         return result
+    
+    def get_full_score(self, x_docs, y_real_docs):
+        """
+        Отвечает за получение полного отчета
+        :param x_docs: Данные для оценки в формате документов
+        :param y_real_docs: Ответ на данных в формате документов
+        :return:
+        """
+        y_pred_docs = self.predict(x_docs)
+
+        y_pred_sent = list(itertools.chain(*y_pred_docs))
+        y_real_sent = list(itertools.chain(*y_real_docs))
+
+        enc = utils.LabelEncoder()
+        y_pred_sent = [[enc.get(el) for el in arr] for arr in y_pred_sent]
+        y_real_sent = [[enc.get(el) for el in arr] for arr in y_real_sent]
+        labels = ["PER", "ORG", "LOC", "MISC"]
+        scorer.Scorer.get_full_score(labels, y_pred_sent, y_real_sent, enc)
 
     def get_params(self, deep=True):
         """

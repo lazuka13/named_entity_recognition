@@ -32,6 +32,30 @@ class Scorer:
             false_positive += est._false_positive
             false_negative += est._false_negative
         return (2 * true_positive) / (2 * true_positive + false_negative + false_positive)
+    
+    @staticmethod
+    def get_full_score(labels, y_pred_sent, y_test_sent, encoder):
+        true_positive, false_positive, false_negative = 0, 0, 0
+        print('label    precision    recall    f1-score')
+        print()
+        for label in labels:
+            est = Scorer(y_pred_sent, y_test_sent, label, labels, encoder)
+            est.compute_proper_f1()
+            true_positive += est._true_positive
+            false_positive += est._false_positive
+            false_negative += est._false_negative
+            print(f'{label:5}{est.get_precision():10.4f}{est.get_recall():13.4f}{est.get_f1_measure():10.4f}')
+        print('')
+        total_f1 = (2 * true_positive) / (2 * true_positive + false_negative + false_positive)
+        if false_positive + true_positive > 0:
+            total_precision = float(true_positive) / (true_positive + false_positive)
+        else:
+            total_precision = 0
+        if false_negative + true_positive > 0:
+            total_recall = float(true_positive) / (true_positive + false_negative)
+        else:
+            total_recall = 0
+        print(f'total{total_precision:10.4f}{total_recall:13.4f}{total_f1:10.4f}')
 
     def get_f1_measure(self):
         if self._recall + self._precision > 0:

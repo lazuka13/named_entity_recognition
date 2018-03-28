@@ -222,6 +222,7 @@ class Generator:
             features_list += doc_features_list
 
         features_list = np.array(features_list)
+        print("Признаков в исходном виде: " + str(features_list.shape))
 
         logger.debug(f'Генерация исходных признаков завершена!')
         logger.debug(f'Для каждого токена создано {features_list.shape[1]} признаков!')
@@ -264,7 +265,6 @@ class Generator:
             if current_weight > self._min_weight:
                 break
         features_list = features_list[:, self._columns_to_keep]
-        print(f'Осталось {self._columns_to_keep} признаков')
         self.features_classes_ = np.take(self.features_classes_, self._columns_to_keep)
 
         logger.debug('После удаления неинформативных признаков следующее число признаков осталось:')
@@ -284,6 +284,7 @@ class Generator:
                          f'максимальный вес - {max(weights)}')
 
         logger.debug(f'Всего осталось признаков - {len(self._columns_to_keep)}!')
+        print("Признаков осталось: " + str(len(self._columns_to_keep)))
 
         logger.debug('Сохраняем разреженную матрицу признаков!')
         self.save_csr(path, features_list)
@@ -409,12 +410,6 @@ class Generator:
 
         features_list = np.array(features_list)
 
-        # logger.debug(f'Удаление редких значений! Граница - {self._rare_count}!')
-        # self._number_of_columns = features_list.shape[1]
-        # for s in range(len(features_list)):
-        #    for m in range(self._number_of_columns):
-        #        features_list[s][m] = self.get_feature(m, features_list[s][m])
-
         logger.debug(f'Бинаризация оставшихся признаков!')
         features_list = self._binarizer.transform(features_list)
         features_list = self._encoder.transform(features_list)
@@ -433,27 +428,27 @@ class Generator:
     @staticmethod
     def letters_type(token):
         if PUNCT_PATTERN.match(token):
-            return np.int8(1)
+            return 'f_lt_punct'
         if len(token) == 0:
-            return np.int8(1)
+            return 'f_lt_empty'
         if token.islower():
-            return np.int8(2)
+            return 'f_lt_lower'
         elif token.isupper():
-            return np.int8(3)
+            return 'f_lt_upper'
         elif token[0].isupper() and len(token) == 1:
-            return np.int8(4)
+            return 'f_lt_upper_one'
         elif token[0].isupper() and token[1:].islower():
-            return np.int8(5)
+            return 'f_lt_upper_first'
         else:
-            return np.int8(6)
+            return 'f_lt_other'
 
     @staticmethod
     def get_is_number(token):
         try:
             complex(token)
         except ValueError:
-            return np.int8(1)
-        return np.int8(1)
+            return 'f_is_digit_true'
+        return 'f_is_digit_false'
 
     def get_initial(self, token):
         result = self.parser.initial(token)
@@ -464,14 +459,14 @@ class Generator:
         if result is not None and self.counter[result] > self._rare_count:
             return result
         else:
-            return np.int8(0)
+            return 'rare_initial_token'
 
     @staticmethod
     def get_is_punct(token):
         if PUNCT_PATTERN.match(token):
-            return np.int8(2)
+            return 'f_is_punct_true'
         else:
-            return np.int8(1)
+            return 'f_is_punct_false'
 
     @staticmethod
     def save_csr(filename, array):

@@ -42,6 +42,8 @@ class Generator:
         self._rewrite = rewrite
         self._history = history
 
+        self.features_classes_ = None
+
         if self._language == 'ru':
             class Parser:
                 def __init__(self):
@@ -230,6 +232,13 @@ class Generator:
         self._binarizer = ColumnApplier({i: LabelEncoder() for i in range(features_list.shape[1])})
         features_list = self._binarizer.fit(features_list).transform(features_list)
 
+        self.features_classes_ = []
+        for el in self._binarizer.classes_:
+            for i in el:
+                self.features_classes_.append(str(i))
+
+        self.features_classes_ = np.array(self.features_classes_)
+
         # Применяем OneHotEncoder к признакам
         self._encoder = OneHotEncoder(dtype=np.int8, sparse=True)
         features_list = self._encoder.fit(features_list).transform(features_list)
@@ -255,6 +264,8 @@ class Generator:
             if current_weight > self._min_weight:
                 break
         features_list = features_list[:, self._columns_to_keep]
+        print(f'Осталось {self._columns_to_keep} признаков')
+        self.features_classes_ = np.take(self.features_classes_, self._columns_to_keep)
 
         logger.debug('После удаления неинформативных признаков следующее число признаков осталось:')
         for key, value in features_indexes_encoded.items():
@@ -495,10 +506,12 @@ class Generator:
 class ColumnApplier(object):
     def __init__(self, column_stages):
         self._column_stages = column_stages
+        self.classes_ = []
 
     def fit(self, x):
         for i, k in self._column_stages.items():
             k.fit(x[:, i])
+            self.classes_.append(k.classes_)
         return self
 
     def transform(self, x):

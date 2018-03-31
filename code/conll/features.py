@@ -1,6 +1,6 @@
 from sklearn.preprocessing import LabelEncoder, OneHotEncoder
 from sklearn.ensemble import ExtraTreesClassifier
-from scipy.sparse import csr_matrix
+from scipy.sparse import csr_matrix, hstack, vstack
 
 from nltk.stem import WordNetLemmatizer
 from pymorphy2 import MorphAnalyzer
@@ -16,6 +16,21 @@ import os
 logger = logging.getLogger('logger')
 
 PUNCT_PATTERN = re.compile("[{}]+$".format(re.escape(string.punctuation)))
+
+
+def delete_row_csr(matrix, index):
+    if not isinstance(matrix, csr_matrix):
+        raise ValueError("works only for CSR format -- use .tocsr() first")
+    n = matrix.indptr[index + 1] - matrix.indptr[index]
+    if n > 0:
+        matrix.data[matrix.indptr[index]:-n] = matrix.data[matrix.indptr[index + 1]:]
+        matrix.data = matrix.data[:-n]
+        matrix.indices[matrix.indptr[index]:-n] = matrix.indices[matrix.indptr[index + 1]:]
+        matrix.indices = matrix.indices[:-n]
+    matrix.indptr[index:-1] = matrix.indptr[index + 1:]
+    matrix.indptr[index:] -= n
+    matrix.indptr = matrix.indptr[:-1]
+    matrix._shape = (matrix._shape[0] - 1, matrix._shape[1])
 
 
 class Generator:
@@ -76,19 +91,9 @@ class Generator:
         self.counter_ = None
         self.features_length_ = None
         self.features_to_keep_ = None
+        self.SAMPLE_HISTORY_LINE = None
 
     def fit_generate(self, x_docs, y_docs, path, clf=ExtraTreesClassifier()):
-        """
-        Отвечает за генерацию признаков и настройку генератора для отбора верных признаков
-        Принимает данные в формате документов, возвращает признаки в таком же формате
-        (побитыми на документы)
-        :param x_docs: данные для генерации признаков
-        :param y_docs: правильные ответы на данных
-        :param path: путь к файлу для загрузки/сохранения созданных данных
-        :param clf: классификатор для отбора признаков по их весу
-        :return:
-        """
-
         if os.path.exists(path) and not self.rewrite_data_:
             sparse_features_list = self.load_csr(path)
             return sparse_features_list
@@ -105,7 +110,10 @@ class Generator:
         self.counter_ = collections.Counter(initial_all)
 
         features_list = []
+        hist_features_list = []
+
         features_indexes = dict()
+        hist_features_indexes = dict()
         index_ = 0
 
         total_count = 0
@@ -136,6 +144,7 @@ class Generator:
                 chunk_index = None
 
             doc_features_list = []
+            doc_hist_features_list = []
 
             for k in range(len(x_doc) - 2 * self.context_len_):
                 line = []
@@ -228,9 +237,9 @@ class Generator:
 
                 if first_time:
                     self.features_length_ = len(line)
+                    self.SAMPLE_HISTORY_LINE = np.array(['no_history' for _ in range(self.features_length_)])
 
                 if self.history_:
-                    history_line = None
                     for a in range(i - 1, self.context_len_ if i - 1000 < self.context_len_ else i - 1000, -1):
                         if initial[a] == initial[i] and is_punct[i] == 'false' and is_number[i] == 'false':
                             history_line_full = doc_features_list[a - self.context_len_]
@@ -238,36 +247,46 @@ class Generator:
                             history_count += 1
                             break
                     else:
-                        history_line = np.array(['no_history' for _ in range(self.features_length_)])
+                        history_line = self.SAMPLE_HISTORY_LINE
 
                     if first_time:
-                        hist_dict = dict()
-                        for key, value in features_indexes.items():
-                            hist_dict['history_' + key] = [index + self.features_length_ for index in value]
-                        features_indexes.update(hist_dict)
+                        for feature_class, indexes in features_indexes.items():
+                            hist_features_indexes['history_' + feature_class] = [index for index in indexes]
 
-                    line = line + history_line
+                    doc_hist_features_list.append(history_line)
 
                 doc_features_list.append(np.array(line))
                 total_count += 1
                 first_time = False
 
             features_list += doc_features_list
+            if self.history_:
+                hist_features_list += doc_hist_features_list
 
+        # add SAMPLE_HISTORY_LINE to fit binarizer and encoder
+        features_list.append(self.SAMPLE_HISTORY_LINE)
+
+        hist_features_list = np.array(hist_features_list)
         features_list = np.array(features_list)
 
-        print(f'Признаков в исходном виде: {features_list.shape[2]}')
+        print(f'Признаков в исходном виде: {self.features_length_}')
         print(f'Обработано {total_count} токенов!')
-        print(f'{history_count} токенов имеют историю в рамках документа!')
+        if self.history_:
+            print(f'{history_count} токенов имеют историю в рамках документа!')
 
         label_encoders = {i: LabelEncoder() for i in range(self.features_length_)}
-        self.binarizer_ = LaberEncoderWide(label_encoders, history=self.history_)
+        self.binarizer_ = LaberEncoderWide(label_encoders)
         features_list = self.binarizer_.fit(features_list).transform(features_list)
 
         self.features_classes_ = []
         for one_binarizer_classes in self.binarizer_.classes_:
             for class_name in one_binarizer_classes:
                 self.features_classes_.append(class_name)
+
+        features_classes_len = len(self.features_classes_)
+
+        # duplicate for history features classes
+        self.features_classes_ = self.features_classes_ + self.features_classes_
 
         self.encoder_ = OneHotEncoder(dtype=np.int8, sparse=True)
         features_list = self.encoder_.fit(features_list).transform(features_list)
@@ -288,6 +307,30 @@ class Generator:
         for key, values in features_indexes_encoded.items():
             for index in values:
                 self.features_classes_[index] = key + ' - ' + self.features_classes_[index]
+
+        # remove SAMPLE_HISTORY_LINE
+        encoded_features_len = features_list.shape[0]
+        delete_row_csr(features_list, encoded_features_len - 1)
+
+        # hist_features_list
+        if self.history_:
+            hist_features_list = self.binarizer_.transform(hist_features_list)
+            hist_features_list = self.encoder_.transform(hist_features_list)
+
+            hist_features_indexes_encoded = dict()
+            for key, value in hist_features_indexes.items():
+                indexes_encoded = []
+                for index in value:
+                    indexes_encoded += list(range(self.encoder_.feature_indices_[index] + features_classes_len,
+                                                  self.encoder_.feature_indices_[index + 1] + features_classes_len, 1))
+                hist_features_indexes_encoded[key] = indexes_encoded
+
+            for key, values in hist_features_indexes_encoded.items():
+                for index in values:
+                    self.features_classes_[index] = key + ' - ' + self.features_classes_[index]
+
+            features_list = hstack([features_list, hist_features_list])
+            features_list = csr_matrix(features_list)
 
         clf.fit(features_list, y_tokens)
         features_weight = sorted([(i, el) for i, el in enumerate(clf.feature_importances_)],
@@ -322,15 +365,7 @@ class Generator:
         return x_docs_flat, y_docs_flat
 
     def generate(self, x_docs, path):
-        """
-        Отвечает за генерацию признаков обученным генератором
-        :param x_docs: данные для генерации признаков
-        :param path: путь к файлу для загрузк/сохранения созданных данных
-        :return:
-        """
-
         if os.path.exists(path) and not self.rewrite_data_:
-            logger.debug('Загружаем разреженную матрицу признаков!')
             sparse_features_list = self.load_csr(path)
             return sparse_features_list
 
@@ -342,20 +377,21 @@ class Generator:
             big_x_docs.append(big_x_doc)
         x_docs = big_x_docs
 
-        logger.debug('Приступаем к созданию признаков!')
         features_list = []
+        hist_features_list = []
+
         for x_doc in x_docs:
 
             x_doc = [["" for _ in range(len(self.column_types_))] for _ in range(self.context_len_)] + x_doc
             x_doc = x_doc + [["" for _ in range(len(self.column_types_))] for _ in range(self.context_len_)]
 
-            logger.debug('Рассчитываем значения для всех элементов датасета')
             word_index = self.column_types_.index("words")
             word = [(el[word_index]) for el in x_doc]
             initial = [self.get_initial_counted(el) for el in word]
             is_punct = [self.get_is_punct(el) for el in word]
             letters_type = [self.letters_type(el) for el in word]
             is_number = [self.get_is_number(el) for el in word]
+
             if 'pos' in self.column_types_:
                 pos_index = self.column_types_.index('pos')
                 pos_tag = [(el[pos_index]) for el in x_doc]
@@ -367,8 +403,8 @@ class Generator:
             else:
                 chunk_index = None
 
-            logger.debug('Учет контекста!')
             doc_features_list = []
+            doc_hist_features_list = []
 
             for k in range(len(x_doc) - 2 * self.context_len_):
                 line = []
@@ -412,7 +448,6 @@ class Generator:
                 line += initial_line
 
                 length_without_history = len(line)
-                line = np.array(line)
 
                 if self.history_:
                     history_line = None
@@ -422,24 +457,31 @@ class Generator:
                             history_line = history_line_full[:length_without_history]
                             break
                     if history_line is None:
-                        history_line = np.array([-1 for _ in range(self.features_length_)])
-                    line = np.append(line, history_line)
+                        history_line = self.SAMPLE_HISTORY_LINE
 
-                doc_features_list.append(line)
+                    doc_hist_features_list.append(np.array(history_line))
+
+                doc_features_list.append(np.array(line))
+
             features_list += doc_features_list
+            if self.history_:
+                hist_features_list += doc_hist_features_list
 
         features_list = np.array(features_list)
+        hist_features_list = np.array(hist_features_list)
 
-        logger.debug(f'Бинаризация оставшихся признаков!')
         features_list = self.binarizer_.transform(features_list)
         features_list = self.encoder_.transform(features_list)
 
-        logger.debug(f'Удаление слабо информативных признаков! Граница - {self.total_weight_}!')
+        if self.history_:
+            hist_features_list = self.binarizer_.transform(hist_features_list)
+            hist_features_list = self.encoder_.transform(hist_features_list)
+            features_list = hstack([features_list, hist_features_list])
+            features_list = csr_matrix(features_list)
+
         features_list = features_list[:, self.features_to_keep_]
 
-        logger.debug('Сохраняем разреженную матрицу признаков!')
         self.save_csr(path, features_list)
-
         return features_list
 
     def get_pos_tag(self, token):
@@ -506,35 +548,19 @@ class Generator:
 
 
 class LaberEncoderWide(object):
-    def __init__(self, column_stages, history=False):
-        self.history = history
-        self._column_stages = column_stages
+    def __init__(self, column_stages):
+        self.column_stages_ = column_stages
         self.classes_ = []
 
     def fit(self, x):
         x = x.copy()
-        if self.history:
-            for i, k in self._column_stages.items():
-                k.fit(np.append(x[:, i], np.array([-1])))
-                self.classes_.append(k.classes_)
-            self.classes_ = self.classes_ + self.classes_
-            return self
-        else:
-            for i, k in self._column_stages.items():
-                k.fit(x[:, i])
-                self.classes_.append(k.classes_)
-            return self
+        for i, k in self.column_stages_.items():
+            k.fit(x[:, i])
+            self.classes_.append(k.classes_)
+        return self
 
     def transform(self, x):
-        if self.history:
-            x = x.copy()
-            for i, k in self._column_stages.items():
-                x[:, i] = k.transform(x[:, i])
-            for i, k in self._column_stages.items():
-                x[:, i + len(self._column_stages)] = k.transform(x[:, i + len(self._column_stages)])
-            return x
-        else:
-            x = x.copy()
-            for i, k in self._column_stages.items():
-                x[:, i] = k.transform(x[:, i])
-            return x
+        x = x.copy()
+        for i, k in self.column_stages_.items():
+            x[:, i] = k.transform(x[:, i])
+        return x

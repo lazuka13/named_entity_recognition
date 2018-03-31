@@ -43,3 +43,47 @@ def docs_from_dataset(folder_path, file_name, column_types, used_columns, sent2f
         y_docs.append(y_sent[index:index + length])
         index += length
     return x_docs, y_docs
+
+def docs_from_dataset_tokens(dataset, tags=['words', 'pos', 'chunk']):
+    y = [el[1] for el in dataset.get_ne()]
+    x = dataset.get_tags(tags=tags)
+
+    x_sent, y_sent = [], []
+    index = 0
+    for sent in dataset.sents():
+        length = len(sent)
+        if length == 0:
+            continue
+        x_sent.append(x[index:index + length])
+        y_sent.append(y[index:index + length])
+        index += length
+    x_docs, y_docs = [], []
+    index = 0
+    for doc in dataset.docs():
+        length = len(doc)
+        if length == 0:
+            continue
+        x_docs.append(x_sent[index:index + length])
+        y_docs.append(y_sent[index:index + length])
+        index += length
+    return x_docs, y_docs
+
+
+def xdocs_from_x_dataset(x, dataset):
+    x_sent = []
+    index = 0
+    for sent in dataset.sents():
+        length = len(sent)
+        if length == 0:
+            continue
+        x_sent.append(x[index:index + length])
+        index += length
+    x_docs = []
+    index = 0
+    for doc in dataset.docs():
+        length = len(doc)
+        if length == 0:
+            continue
+        x_docs.append(x_sent[index:index + length])
+        index += length
+    return x_docs

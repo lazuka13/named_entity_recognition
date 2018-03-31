@@ -19,8 +19,14 @@ PUNCT_PATTERN = re.compile("[{}]+$".format(re.escape(string.punctuation)))
 
 
 class Generator:
-    def __init__(self, columntypes=None, context_len=2, language='ru',
-                 rare_count=5, min_weight=0.9, rewrite=False, history=False):
+    def __init__(self,
+                 columntypes=None,
+                 context_len=2,
+                 language='ru',
+                 rare_count=5,
+                 min_weight=0.9,
+                 rewrite=False,
+                 history=False):
         """
         Конструктор генератора признаков
         :param columntypes: типы столбцов в верной посл-ти, например ['words', 'pos', 'chunk']
@@ -31,20 +37,16 @@ class Generator:
         :param rewrite: перезаписывать ли файл с признаками
         :param history: использовать ли историю предыдущих вхождений
         """
-        logger.info(f'Параметры генерации признаков: context_len = {context_len}, language = {language}, '
-                    f'rare_count = {rare_count}, min_weight = {min_weight}, history = {history}')
 
-        self._column_types = columntypes
-        self._context_len = context_len
-        self._rare_count = rare_count
-        self._min_weight = min_weight
-        self._language = language
-        self._rewrite = rewrite
-        self._history = history
+        self.column_types_ = columntypes
+        self.context_len_ = context_len
+        self.rare_count_ = rare_count
+        self.total_weight_ = min_weight
+        self.lang_ = language
+        self.rewrite_data_ = rewrite
+        self.history_ = history
 
-        self.features_classes_ = None
-
-        if self._language == 'ru':
+        if self.lang_ == 'ru':
             class Parser:
                 def __init__(self):
                     self.inner = MorphAnalyzer()
@@ -55,7 +57,7 @@ class Generator:
                 def pos(self, token):
                     return self.inner.parse(token)[0].tag.POS
 
-            self.parser = Parser()
+            self.parser_ = Parser()
         else:
             class Parser:
                 def __init__(self):
@@ -67,14 +69,13 @@ class Generator:
                 def initial(self, token):
                     return self.inner.lemmatize(token)
 
-            self.parser = Parser()
+            self.parser_ = Parser()
 
-        self._encoder, self._binarizer = None, None
-        self._counters = []
-        self.counter = None
-
-        self._number_of_columns = 0
-        self._columns_to_keep = 0
+        self.encoder_, self.binarizer_ = None, None
+        self.features_classes_ = None
+        self.counter_ = None
+        self.features_length_ = None
+        self.features_to_keep_ = None
 
     def fit_generate(self, x_docs, y_docs, path, clf=ExtraTreesClassifier()):
         """
@@ -88,23 +89,20 @@ class Generator:
         :return:
         """
 
-        if os.path.exists(path) and not self._rewrite:
-            logger.debug('Загружаем разреженную матрицу признаков!')
+        if os.path.exists(path) and not self.rewrite_data_:
             sparse_features_list = self.load_csr(path)
             return sparse_features_list
 
-        x_docs_flat, y_docs_flat = self.flatten_docs(x_docs, y_docs)  # представление без предложений
+        x_docs_flat, y_docs_flat = self.flatten_docs(x_docs, y_docs)
         y_tokens, x_tokens = [], []
         for y_doc_flat, x_doc_flat in zip(y_docs_flat, x_docs_flat):
             y_tokens += y_doc_flat
             x_tokens += x_doc_flat
 
-        # посчитаем частоту признаков
-        logger.debug('Подсчет числа признаков, удаление редких признаков')
-        word_index = self._column_types.index("words")
+        word_index = self.column_types_.index('words')
         words_all = [(el[word_index]) for el in x_tokens]
         initial_all = [self.get_initial(el) for el in words_all]
-        self.counter = collections.Counter(initial_all)
+        self.counter_ = collections.Counter(initial_all)
 
         features_list = []
         features_indexes = dict()
@@ -114,179 +112,200 @@ class Generator:
         history_count = 0
 
         first_time = True
+
         for x_doc, y_doc in zip(x_docs_flat, y_docs_flat):
 
-            x_doc = [['' for _ in range(len(self._column_types))] for _ in range(self._context_len)] + x_doc
-            x_doc = x_doc + [['' for _ in range(len(self._column_types))] for _ in range(self._context_len)]
+            x_doc = [['' for _ in range(len(self.column_types_))] for _ in range(self.context_len_)] + x_doc
+            x_doc = x_doc + [['' for _ in range(len(self.column_types_))] for _ in range(self.context_len_)]
 
             word = [(el[word_index]) for el in x_doc]
             initial = [self.get_initial_counted(el) for el in word]
             is_punct = [self.get_is_punct(el) for el in word]
             letters_type = [self.letters_type(el) for el in word]
             is_number = [self.get_is_number(el) for el in word]
-            if 'pos' in self._column_types:
-                pos_index = self._column_types.index('pos')
+
+            if 'pos' in self.column_types_:
+                pos_index = self.column_types_.index('pos')
                 pos_tag = [(el[pos_index]) for el in x_doc]
             else:
                 pos_tag = [self.get_pos_tag(el[word_index]) for el in x_doc]
-            if 'chunk' in self._column_types:
-                chunk_index = self._column_types.index('chunk')
+            if 'chunk' in self.column_types_:
+                chunk_index = self.column_types_.index('chunk')
                 chunk_tag = [(el[chunk_index]) for el in x_doc]
             else:
                 chunk_index = None
 
             doc_features_list = []
 
-            for k in range(len(x_doc) - 2 * self._context_len):
+            for k in range(len(x_doc) - 2 * self.context_len_):
                 line = []
-                i = k + self._context_len
+                i = k + self.context_len_
 
                 pos_tag_line = [pos_tag[i]]
-                for j in range(1, self._context_len + 1):
+                for j in range(1, self.context_len_ + 1):
                     pos_tag_line.append(pos_tag[i - j])
                     pos_tag_line.append(pos_tag[i + j])
                 line += pos_tag_line
                 if first_time:
-                    features_indexes['pos_tag'] = [g for g in range(index_, index_ + len(pos_tag_line), 1)]
-                    index_ += len(pos_tag_line)
+                    features_indexes['pos_tag_0'] = [index_]
+                    index_ += 1
+                    for j in range(1, self.context_len_ + 1):
+                        features_indexes[f'pos_tag_{-j}'] = [index_]
+                        index_ += 1
+                        features_indexes[f'pos_tag_{j}'] = [index_]
+                        index_ += 1
 
                 if chunk_index is not None:
                     chunk_tag_line = [chunk_tag[i]]
-                    for j in range(1, self._context_len + 1):
+                    for j in range(1, self.context_len_ + 1):
                         chunk_tag_line.append(chunk_tag[i - j])
                         chunk_tag_line.append(chunk_tag[i + j])
                     line += chunk_tag_line
                     if first_time:
-                        features_indexes['chunk_tag'] = [g for g in range(index_, index_ + len(chunk_tag_line), 1)]
-                        index_ += len(chunk_tag_line)
+                        features_indexes['chunk_tag_0'] = [index_]
+                        index_ += 1
+                        for j in range(1, self.context_len_ + 1):
+                            features_indexes[f'chunk_tag_{-j}'] = [index_]
+                            index_ += 1
+                            features_indexes[f'chunk_tag_{j}'] = [index_]
+                            index_ += 1
 
                 letters_type_line = [letters_type[i]]
-                for j in range(1, self._context_len + 1):
+                for j in range(1, self.context_len_ + 1):
                     letters_type_line.append(letters_type[i - j])
                     letters_type_line.append(letters_type[i + j])
                 line += letters_type_line
                 if first_time:
-                    features_indexes['letters_type'] = [g for g in range(index_, index_ + len(letters_type_line), 1)]
-                    index_ += len(letters_type_line)
+                    features_indexes['letters_type_0'] = [index_]
+                    index_ += 1
+                    for j in range(1, self.context_len_ + 1):
+                        features_indexes[f'letters_type_{-j}'] = [index_]
+                        index_ += 1
+                        features_indexes[f'letters_type_{j}'] = [index_]
+                        index_ += 1
 
                 is_punct_line = [is_punct[i]]
-                for j in range(1, self._context_len + 1):
+                for j in range(1, self.context_len_ + 1):
                     is_punct_line.append(is_punct[i - j])
                     is_punct_line.append(is_punct[i + j])
                 line += is_punct_line
                 if first_time:
-                    features_indexes['is_punct'] = [g for g in range(index_, index_ + len(is_punct_line), 1)]
-                    index_ += len(is_punct_line)
+                    features_indexes['is_punct_0'] = [index_]
+                    index_ += 1
+                    for j in range(1, self.context_len_ + 1):
+                        features_indexes[f'is_punct_{-j}'] = [index_]
+                        index_ += 1
+                        features_indexes[f'is_punct_{j}'] = [index_]
+                        index_ += 1
 
                 is_number_line = [is_number[i]]
-                for j in range(1, self._context_len + 1):
+                for j in range(1, self.context_len_ + 1):
                     is_number_line.append(is_number[i - j])
                     is_number_line.append(is_number[i + j])
                 line += is_number_line
                 if first_time:
-                    features_indexes['is_number'] = [g for g in range(index_, index_ + len(is_number_line), 1)]
-                    index_ += len(is_number_line)
+                    features_indexes['is_number_0'] = [index_]
+                    index_ += 1
+                    for j in range(1, self.context_len_ + 1):
+                        features_indexes[f'is_number_{-j}'] = [index_]
+                        index_ += 1
+                        features_indexes[f'is_number_{j}'] = [index_]
+                        index_ += 1
 
                 initial_line = [initial[i]]
-                for j in range(1, self._context_len + 1):
+                for j in range(1, self.context_len_ + 1):
                     initial_line.append(initial[i - j])
                     initial_line.append(initial[i + j])
                 line += initial_line
                 if first_time:
-                    features_indexes['initial'] = [g for g in range(index_, index_ + len(initial_line), 1)]
-                    index_ += len(initial_line)
+                    features_indexes['initial_0'] = [index_]
+                    index_ += 1
+                    for j in range(1, self.context_len_ + 1):
+                        features_indexes[f'initial_{-j}'] = [index_]
+                        index_ += 1
+                        features_indexes[f'initial_{j}'] = [index_]
+                        index_ += 1
 
-                length_without_history = len(line)
-                line = np.array(line)
+                if first_time:
+                    self.features_length_ = len(line)
 
-                if self._history:
+                if self.history_:
                     history_line = None
-                    for a in range(i - 1, self._context_len if i - 1000 < self._context_len else i - 1000, -1):
-                        if initial[a] == initial[i] and is_punct[i] == 1 and is_number[i] == 1:
-                            history_line_full = doc_features_list[a - self._context_len]
-                            history_line = history_line_full[:length_without_history]
+                    for a in range(i - 1, self.context_len_ if i - 1000 < self.context_len_ else i - 1000, -1):
+                        if initial[a] == initial[i] and is_punct[i] == 'false' and is_number[i] == 'false':
+                            history_line_full = doc_features_list[a - self.context_len_]
+                            history_line = history_line_full[:self.features_length_]
+                            history_count += 1
                             break
-                    if history_line is None:
-                        history_line = np.zeros(length_without_history)
                     else:
-                        history_count += 1
+                        history_line = np.array(['no_history' for _ in range(self.features_length_)])
+
                     if first_time:
-                        features_indexes['history'] = [g for g in range(index_, index_ + len(history_line), 1)]
-                        index_ += len(history_line)
+                        hist_dict = dict()
+                        for key, value in features_indexes.items():
+                            hist_dict['history_' + key] = [index + self.features_length_ for index in value]
+                        features_indexes.update(hist_dict)
 
-                    line = np.append(line, history_line)
+                    line = line + history_line
 
-                doc_features_list.append(line)
+                doc_features_list.append(np.array(line))
                 total_count += 1
                 first_time = False
+
             features_list += doc_features_list
 
         features_list = np.array(features_list)
-        print("Признаков в исходном виде: " + str(features_list.shape))
 
-        logger.debug(f'Генерация исходных признаков завершена!')
-        logger.debug(f'Для каждого токена создано {features_list.shape[1]} признаков!')
-        logger.debug(f'Обработано {total_count} токенов!')
-        logger.debug(f'{history_count} токенов имеют историю в рамках документа!')
+        print(f'Признаков в исходном виде: {features_list.shape[2]}')
+        print(f'Обработано {total_count} токенов!')
+        print(f'{history_count} токенов имеют историю в рамках документа!')
 
-        # Обработка признаков LabelEncoder-ом
-        self._binarizer = ColumnApplier({i: LabelEncoder() for i in range(features_list.shape[1])})
-        features_list = self._binarizer.fit(features_list).transform(features_list)
+        label_encoders = {i: LabelEncoder() for i in range(self.features_length_)}
+        self.binarizer_ = LaberEncoderWide(label_encoders, history=self.history_)
+        features_list = self.binarizer_.fit(features_list).transform(features_list)
 
         self.features_classes_ = []
-        for el in self._binarizer.classes_:
-            for i in el:
-                self.features_classes_.append(str(i))
+        for one_binarizer_classes in self.binarizer_.classes_:
+            for class_name in one_binarizer_classes:
+                self.features_classes_.append(class_name)
 
-        self.features_classes_ = np.array(self.features_classes_)
-
-        # Применяем OneHotEncoder к признакам
-        self._encoder = OneHotEncoder(dtype=np.int8, sparse=True)
-        features_list = self._encoder.fit(features_list).transform(features_list)
+        self.encoder_ = OneHotEncoder(dtype=np.int8, sparse=True)
+        features_list = self.encoder_.fit(features_list).transform(features_list)
 
         features_indexes_encoded = dict()
         for key, value in features_indexes.items():
             indexes_encoded = []
             for index in value:
-                indexes_encoded += list(range(self._encoder.feature_indices_[index],
-                                              self._encoder.feature_indices_[index + 1] + 1, 1))
+                indexes_encoded += list(range(self.encoder_.feature_indices_[index],
+                                              self.encoder_.feature_indices_[index + 1], 1))
             features_indexes_encoded[key] = indexes_encoded
 
-        logger.debug(f'Удаление неинформативных признаков! Оставляемый вес признаков '
-                     f'(по feature_importances) - {self._min_weight}!')
+        # features_indexes contains information without one-hot encoding:
+        # features_indexes['initial_0'] = [1] # only one index
+        # features_indexes_encoded contains information about indexes after one-hot encoding:
+        # features_indexes_encoded['initial_0'] = [1, 2, 3, 4 ...] # all indexes that were created for this feature
+
+        for key, values in features_indexes_encoded.items():
+            for index in values:
+                self.features_classes_[index] = key + ' - ' + self.features_classes_[index]
+
         clf.fit(features_list, y_tokens)
         features_weight = sorted([(i, el) for i, el in enumerate(clf.feature_importances_)],
                                  key=lambda el: -el[1])
         current_weight = 0.0
-        self._columns_to_keep = []
+        self.features_to_keep_ = []
         for el in features_weight:
-            self._columns_to_keep.append(el[0])
+            self.features_to_keep_.append(el[0])
             current_weight += el[1]
-            if current_weight > self._min_weight:
+            if current_weight > self.total_weight_:
                 break
-        features_list = features_list[:, self._columns_to_keep]
-        self.features_classes_ = np.take(self.features_classes_, self._columns_to_keep)
+        features_list = features_list[:, self.features_to_keep_]
 
-        logger.debug('После удаления неинформативных признаков следующее число признаков осталось:')
-        for key, value in features_indexes_encoded.items():
-            indexes = []
-            for index in value:
-                if index in self._columns_to_keep:
-                    indexes.append(index)
-            features_indexes_encoded[key] = indexes
-            logger.debug(f'В категории {key} осталось {len(indexes)} признаков, было {len(value)} признаков!')
-            if len(indexes) == 0:
-                continue
-            weights = []
-            for index in indexes:
-                weights.append(clf.feature_importances_[index])
-            logger.debug(f'Общий вес категории - {sum(weights)}, минимальный вес - {min(weights)}, '
-                         f'максимальный вес - {max(weights)}')
+        self.features_classes_ = np.take(np.array(self.features_classes_),
+                                         self.features_to_keep_)
 
-        logger.debug(f'Всего осталось признаков - {len(self._columns_to_keep)}!')
-        print("Признаков осталось: " + str(len(self._columns_to_keep)))
+        print("Признаков осталось: " + str(len(self.features_to_keep_)))
 
-        logger.debug('Сохраняем разреженную матрицу признаков!')
         self.save_csr(path, features_list)
         return features_list
 
@@ -310,7 +329,7 @@ class Generator:
         :return:
         """
 
-        if os.path.exists(path) and not self._rewrite:
+        if os.path.exists(path) and not self.rewrite_data_:
             logger.debug('Загружаем разреженную матрицу признаков!')
             sparse_features_list = self.load_csr(path)
             return sparse_features_list
@@ -327,23 +346,23 @@ class Generator:
         features_list = []
         for x_doc in x_docs:
 
-            x_doc = [["" for _ in range(len(self._column_types))] for _ in range(self._context_len)] + x_doc
-            x_doc = x_doc + [["" for _ in range(len(self._column_types))] for _ in range(self._context_len)]
+            x_doc = [["" for _ in range(len(self.column_types_))] for _ in range(self.context_len_)] + x_doc
+            x_doc = x_doc + [["" for _ in range(len(self.column_types_))] for _ in range(self.context_len_)]
 
             logger.debug('Рассчитываем значения для всех элементов датасета')
-            word_index = self._column_types.index("words")
+            word_index = self.column_types_.index("words")
             word = [(el[word_index]) for el in x_doc]
             initial = [self.get_initial_counted(el) for el in word]
             is_punct = [self.get_is_punct(el) for el in word]
             letters_type = [self.letters_type(el) for el in word]
             is_number = [self.get_is_number(el) for el in word]
-            if 'pos' in self._column_types:
-                pos_index = self._column_types.index('pos')
+            if 'pos' in self.column_types_:
+                pos_index = self.column_types_.index('pos')
                 pos_tag = [(el[pos_index]) for el in x_doc]
             else:
                 pos_tag = [self.get_pos_tag(el[word_index]) for el in x_doc]
-            if 'chunk' in self._column_types:
-                chunk_index = self._column_types.index('chunk')
+            if 'chunk' in self.column_types_:
+                chunk_index = self.column_types_.index('chunk')
                 chunk_tag = [(el[chunk_index]) for el in x_doc]
             else:
                 chunk_index = None
@@ -351,43 +370,43 @@ class Generator:
             logger.debug('Учет контекста!')
             doc_features_list = []
 
-            for k in range(len(x_doc) - 2 * self._context_len):
+            for k in range(len(x_doc) - 2 * self.context_len_):
                 line = []
-                i = k + self._context_len
+                i = k + self.context_len_
 
                 pos_tag_line = [pos_tag[i]]
-                for j in range(1, self._context_len + 1):
+                for j in range(1, self.context_len_ + 1):
                     pos_tag_line.append(pos_tag[i - j])
                     pos_tag_line.append(pos_tag[i + j])
                 line += pos_tag_line
 
                 if chunk_index is not None:
                     chunk_tag_line = [chunk_tag[i]]
-                    for j in range(1, self._context_len + 1):
+                    for j in range(1, self.context_len_ + 1):
                         chunk_tag_line.append(chunk_tag[i - j])
                         chunk_tag_line.append(chunk_tag[i + j])
                     line += chunk_tag_line
 
                 letters_type_line = [letters_type[i]]
-                for j in range(1, self._context_len + 1):
+                for j in range(1, self.context_len_ + 1):
                     letters_type_line.append(letters_type[i - j])
                     letters_type_line.append(letters_type[i + j])
                 line += letters_type_line
 
                 is_punct_line = [is_punct[i]]
-                for j in range(1, self._context_len + 1):
+                for j in range(1, self.context_len_ + 1):
                     is_punct_line.append(is_punct[i - j])
                     is_punct_line.append(is_punct[i + j])
                 line += is_punct_line
 
                 is_number_line = [is_number[i]]
-                for j in range(1, self._context_len + 1):
+                for j in range(1, self.context_len_ + 1):
                     is_number_line.append(is_number[i - j])
                     is_number_line.append(is_number[i + j])
                 line += is_number_line
 
                 initial_line = [initial[i]]
-                for j in range(1, self._context_len + 1):
+                for j in range(1, self.context_len_ + 1):
                     initial_line.append(initial[i - j])
                     initial_line.append(initial[i + j])
                 line += initial_line
@@ -395,14 +414,15 @@ class Generator:
                 length_without_history = len(line)
                 line = np.array(line)
 
-                if self._history:
+                if self.history_:
                     history_line = None
-                    for a in range(i - 2, -1 if i - 1001 < -1 else i - 1001, -1):
-                        if initial[a] == initial[i] and is_punct[i] == 0 and is_number[i] == 0:
-                            history_line = features_list[a - self._context_len][:length_without_history]
+                    for a in range(i - 1, self.context_len_ if i - 1000 < self.context_len_ else i - 1000, -1):
+                        if initial[a] == initial[i] and is_punct[i] == 'false' and is_number[i] == 'false':
+                            history_line_full = doc_features_list[a - self.context_len_]
+                            history_line = history_line_full[:length_without_history]
                             break
                     if history_line is None:
-                        history_line = np.zeros(length_without_history)
+                        history_line = np.array([-1 for _ in range(self.features_length_)])
                     line = np.append(line, history_line)
 
                 doc_features_list.append(line)
@@ -411,11 +431,11 @@ class Generator:
         features_list = np.array(features_list)
 
         logger.debug(f'Бинаризация оставшихся признаков!')
-        features_list = self._binarizer.transform(features_list)
-        features_list = self._encoder.transform(features_list)
+        features_list = self.binarizer_.transform(features_list)
+        features_list = self.encoder_.transform(features_list)
 
-        logger.debug(f'Удаление слабо информативных признаков! Граница - {self._min_weight}!')
-        features_list = features_list[:, self._columns_to_keep]
+        logger.debug(f'Удаление слабо информативных признаков! Граница - {self.total_weight_}!')
+        features_list = features_list[:, self.features_to_keep_]
 
         logger.debug('Сохраняем разреженную матрицу признаков!')
         self.save_csr(path, features_list)
@@ -423,40 +443,40 @@ class Generator:
         return features_list
 
     def get_pos_tag(self, token):
-        return self.parser.pos(token)
+        return self.parser_.pos(token)
 
     @staticmethod
     def letters_type(token):
         if PUNCT_PATTERN.match(token):
-            return 'f_lt_punct'
+            return 'punct'
         if len(token) == 0:
-            return 'f_lt_empty'
+            return 'empty'
         if token.islower():
-            return 'f_lt_lower'
+            return 'lower'
         elif token.isupper():
-            return 'f_lt_upper'
+            return 'upper'
         elif token[0].isupper() and len(token) == 1:
-            return 'f_lt_upper_one'
+            return 'upper_one'
         elif token[0].isupper() and token[1:].islower():
-            return 'f_lt_upper_first'
+            return 'upper_first'
         else:
-            return 'f_lt_other'
+            return 'other'
 
     @staticmethod
     def get_is_number(token):
         try:
             complex(token)
         except ValueError:
-            return 'f_is_digit_true'
-        return 'f_is_digit_false'
+            return 'true'
+        return 'false'
 
     def get_initial(self, token):
-        result = self.parser.initial(token)
-        return result if result is not None else np.int8(0)
+        result = self.parser_.initial(token)
+        return result if result is not None else 'bad_initial_token'
 
     def get_initial_counted(self, token):
-        result = self.parser.initial(token)
-        if result is not None and self.counter[result] > self._rare_count:
+        result = self.parser_.initial(token)
+        if result is not None and self.counter_[result] > self.rare_count_:
             return result
         else:
             return 'rare_initial_token'
@@ -464,9 +484,9 @@ class Generator:
     @staticmethod
     def get_is_punct(token):
         if PUNCT_PATTERN.match(token):
-            return 'f_is_punct_true'
+            return 'true'
         else:
-            return 'f_is_punct_false'
+            return 'false'
 
     @staticmethod
     def save_csr(filename, array):
@@ -484,33 +504,37 @@ class Generator:
                            loader['indptr']),
                           shape=loader['shape'])
 
-    def get_feature(self, f, feature):
-        """
-        Отвечает за избавление от редких признаков
-        :param f:
-        :param feature:
-        :return:
-        """
-        if feature in self._counters[f].keys() and \
-                self._counters[f][feature] > self._rare_count:
-            return feature
-        else:
-            return -1
 
-
-class ColumnApplier(object):
-    def __init__(self, column_stages):
+class LaberEncoderWide(object):
+    def __init__(self, column_stages, history=False):
+        self.history = history
         self._column_stages = column_stages
         self.classes_ = []
 
     def fit(self, x):
-        for i, k in self._column_stages.items():
-            k.fit(x[:, i])
-            self.classes_.append(k.classes_)
-        return self
+        x = x.copy()
+        if self.history:
+            for i, k in self._column_stages.items():
+                k.fit(np.append(x[:, i], np.array([-1])))
+                self.classes_.append(k.classes_)
+            self.classes_ = self.classes_ + self.classes_
+            return self
+        else:
+            for i, k in self._column_stages.items():
+                k.fit(x[:, i])
+                self.classes_.append(k.classes_)
+            return self
 
     def transform(self, x):
-        x = x.copy()
-        for i, k in self._column_stages.items():
-            x[:, i] = k.transform(x[:, i])
-        return x
+        if self.history:
+            x = x.copy()
+            for i, k in self._column_stages.items():
+                x[:, i] = k.transform(x[:, i])
+            for i, k in self._column_stages.items():
+                x[:, i + len(self._column_stages)] = k.transform(x[:, i + len(self._column_stages)])
+            return x
+        else:
+            x = x.copy()
+            for i, k in self._column_stages.items():
+                x[:, i] = k.transform(x[:, i])
+            return x
